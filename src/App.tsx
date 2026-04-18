@@ -60,12 +60,12 @@ const normalizeHeader = (header: string) => {
   if (norm.includes('stock proceeds') || norm.includes('yields')) return 'Yields';
   if (norm === 'units' || norm === 'un' || norm === 'unit') return 'UN';
   if (norm.includes('balance units') || norm.includes('saldo de un') || norm.includes('saldo un')) return 'Saldo de Un';
+  if (norm.includes('b3') && (norm.includes('unit') || norm.includes('un'))) return 'B3 Preço Un';
+  if (norm.includes('b3') && (norm.includes('total') || norm.includes('val'))) return 'B3 Preço total';
   if (norm.includes('cost unit') || norm.includes('preço un') || norm.includes('preco un')) return 'Preço Un de Custo';
   if (norm.includes('total cost') && !norm.includes('balance')) return 'Total do Custo';
   if (norm.includes('balance total cost') || norm.includes('saldo custo')) return 'Saldo Custo';
   if (norm.includes('avarage price') || norm.includes('average price') || norm.includes('preço médio') || norm.includes('preco medio')) return 'Preço Médio';
-  if (norm.includes('b3 unit price') || norm.includes('b3 preço un') || norm.includes('b3 preco un')) return 'B3 Preço Un';
-  if (norm.includes('b3 total price') || norm.includes('b3 preço total') || norm.includes('b3 preco total')) return 'B3 Preço total';
   if (norm.includes('instrument type') || norm.includes('tipo atividade')) return 'Tipo Atividade';
   if (norm.includes('investment broker') || norm.includes('banco/corretora') || norm.includes('corretora')) return 'Banco/Corretora';
   if (norm === 'cnpj') return 'CNPJ';
@@ -306,23 +306,31 @@ export default function App() {
   };
 
   const getPatrimonioFor = (t: string, y: string, m: string) => {
-    if (!allData || y === "All" || m === "All") return 0;
-    const targetData = allData.filter(row => {
-      const matchTicker = t === "All" || row["Ticker"] === t;
-      const parts = row["Data"] ? row["Data"].split('/') : [];
-      const month = parts.length === 3 ? parts[1] : "";
-      const year = parts.length === 3 ? parts[2] : "";
-      return matchTicker && month === m && year === y;
-    });
-
+    if (!allData) return 0;
+    
+    // Convert target year/month to a comparable string YYYYMM
+    const targetYM = (y === "All" || m === "All") ? "999999" : y + m;
+    
+    // Group by Ticker and find the last row that is <= targetYM
     const latestValues = new Map<string, number>();
-    targetData.forEach(row => {
+    
+    // Important: allData must be sorted by date (already handled in processData)
+    allData.forEach(row => {
       const ticker = row["Ticker"];
       if (!ticker || ticker.toUpperCase() === "MONTH CLOSING") return;
       
-      const b3TotalStr = row["B3 Preço total"];
-      if (b3TotalStr && b3TotalStr.trim() !== "") {
-        latestValues.set(ticker, parseMoney(b3TotalStr));
+      const matchTicker = t === "All" || ticker === t;
+      if (!matchTicker) return;
+
+      const parts = row["Data"] ? row["Data"].split('/') : [];
+      if (parts.length !== 3) return;
+      const rowYM = parts[2] + parts[1];
+      
+      if (rowYM <= targetYM) {
+        const b3TotalStr = row["B3 Preço total"];
+        if (b3TotalStr && b3TotalStr.trim() !== "" && b3TotalStr !== "NOT FOUND") {
+          latestValues.set(ticker, parseMoney(b3TotalStr));
+        }
       }
     });
 
@@ -346,7 +354,7 @@ export default function App() {
     if (prevVal === 0) return 0;
     return ((curVal / prevVal) - 1) * 100;
   }, [allData, filterTicker, filterYear, filterMonth]);
-  
+
   const computedPatrimonioVarYtd = useMemo(() => {
     if (filterYear === "All" || filterMonth === "All") return null;
     
@@ -358,27 +366,9 @@ export default function App() {
   }, [allData, filterTicker, filterYear, filterMonth]);
 
   const computedPatrimonio = useMemo(() => {
-    if (!filteredData || filteredData.length === 0) return "R$ 0,00";
-    
-    // We want the latest 'B3 Preço total' for each Ticker.
-    // Since filteredData is sorted by Data ascending, the last occurrence of a ticker is its latest value.
-    const latestValues = new Map<string, number>();
-    
-    filteredData.forEach(row => {
-      const ticker = row["Ticker"];
-      if (!ticker || ticker.toUpperCase() === "MONTH CLOSING") return;
-      
-      const b3TotalStr = row["B3 Preço total"];
-      if (b3TotalStr && b3TotalStr.trim() !== "") {
-        latestValues.set(ticker, parseMoney(b3TotalStr));
-      }
-    });
-
-    let sum = 0;
-    latestValues.forEach(val => sum += val);
-    
+    const sum = getPatrimonioFor(filterTicker, filterYear, filterMonth);
     return `R$ ${sum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  }, [filteredData]);
+  }, [allData, filterTicker, filterYear, filterMonth]);
 
   const computedYields = useMemo(() => {
     if (!filteredData) return "R$ 0,00";
