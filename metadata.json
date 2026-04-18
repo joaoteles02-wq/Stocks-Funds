@@ -1,0 +1,6 @@
+{
+  "name": "Stocks Funds",
+  "description": "Aplicativo financeiro com interface glassmorphism mobile, preparado para importação de CSV.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
