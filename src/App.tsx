@@ -9,13 +9,22 @@ import {
   FileSpreadsheet,
   Filter,
   LayoutDashboard,
-  PlusSquare
+  PlusSquare,
+  LineChart as LineChartIcon,
+  PieChart as PieChartIcon
 } from 'lucide-react';
 import { 
   AreaChart, 
   Area, 
   ResponsiveContainer, 
-  Tooltip
+  Tooltip,
+  XAxis,
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  YAxis
 } from 'recharts';
 import Papa from 'papaparse';
 
@@ -83,8 +92,10 @@ export default function App() {
   
   // Filter States
   const [filterTicker, setFilterTicker] = useState<string>("All");
-  const [filterYear, setFilterYear] = useState<string>("All");
-  const [filterMonth, setFilterMonth] = useState<string>("All");
+  const [filterYear, setFilterYear] = useState<string>(String(new Date().getFullYear()));
+  const [filterMonth, setFilterMonth] = useState<string>(String(new Date().getMonth() + 1).padStart(2, '0'));
+  const [filterTipoAtividade, setFilterTipoAtividade] = useState<string>("All");
+  const [pieViewMode, setPieViewMode] = useState<'Ticker' | 'Tipo Atividade' | 'Banco/Corretora'>('Ticker');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -94,6 +105,8 @@ export default function App() {
   const [formTicker, setFormTicker] = useState("");
   const [formNewTicker, setFormNewTicker] = useState("");
   const [formTransacao, setFormTransacao] = useState("Compra");
+  const [formTipoAtividade, setFormTipoAtividade] = useState("");
+  const [formNewTipoAtividade, setFormNewTipoAtividade] = useState("");
   const [formUn, setFormUn] = useState("");
   const [formPrecoUn, setFormPrecoUn] = useState("");
   const [formYields, setFormYields] = useState("");
@@ -119,6 +132,30 @@ export default function App() {
       });
     }
   }, []);
+
+  // Auto-preenchimento ao selecionar o Ticker
+  useEffect(() => {
+    if (formTicker && formTicker !== "NEW" && allData.length > 0) {
+      // Find the last entry (assuming sequential load or chronological)
+      let match = null;
+      // We search from latest to earliest if possible, or just the whole array since processing pushes them
+      for (let i = allData.length - 1; i >= 0; i--) {
+        if (allData[i]["Ticker"] === formTicker) {
+          match = allData[i];
+          break;
+        }
+      }
+      if (match) {
+        if (match["Tipo Atividade"]) setFormTipoAtividade(String(match["Tipo Atividade"]));
+        if (match["Banco/Corretora"]) setFormCorretora(String(match["Banco/Corretora"]));
+        if (match["CNPJ"]) setFormCnpj(String(match["CNPJ"]));
+      }
+    } else if (formTicker === "NEW") {
+      setFormTipoAtividade("NEW");
+      setFormCorretora("");
+      setFormCnpj("");
+    }
+  }, [formTicker, allData]);
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -263,6 +300,16 @@ export default function App() {
     return Array.from(new Set(allData.map(r => r["Ticker"]).filter(t => t && t.toUpperCase() !== 'MONTH CLOSING'))).sort();
   }, [allData]);
 
+  const atividades = useMemo(() => {
+    if (!allData) return [];
+    return Array.from(new Set(allData.map(r => String(r["Tipo Atividade"] || "").trim()).filter(Boolean))).sort();
+  }, [allData]);
+
+  const corretoras = useMemo(() => {
+    if (!allData) return [];
+    return Array.from(new Set(allData.map(r => String(r["Banco/Corretora"] || "").trim()).filter(Boolean))).sort();
+  }, [allData]);
+
   const years = useMemo(() => {
     if (!allData) return [];
     return Array.from(new Set(allData.map(r => {
@@ -287,14 +334,14 @@ export default function App() {
   const filteredData = useMemo(() => {
     if (!allData) return null;
     return allData.filter(row => {
-      const matchTicker = filterTicker === "All" || row["Ticker"] === filterTicker;
       const parts = row["Data"] ? row["Data"].split('/') : [];
       const month = parts.length === 3 ? parts[1] : "";
       const year = parts.length === 3 ? parts[2] : "";
       
       const matchYear = filterYear === "All" || year === filterYear;
       const matchMonth = filterMonth === "All" || month === filterMonth;
-      return matchTicker && matchYear && matchMonth;
+      const matchTicker = filterTicker === "All" || row["Ticker"] === filterTicker;
+      return matchYear && matchMonth && matchTicker;
     });
   }, [allData, filterTicker, filterYear, filterMonth]);
 
@@ -305,7 +352,7 @@ export default function App() {
     return isNaN(num) ? 0 : num;
   };
 
-  const getPatrimonioFor = (t: string, y: string, m: string) => {
+  const getPatrimonioFor = (t: string, y: string, m: string, tp: string = "All", c: string = "All") => {
     if (!allData) return 0;
     
     // Convert target year/month to a comparable string YYYYMM
@@ -321,6 +368,14 @@ export default function App() {
       
       const matchTicker = t === "All" || ticker === t;
       if (!matchTicker) return;
+
+      const tipoAtiv = String(row["Tipo Atividade"] || "").trim();
+      const matchTipo = tp === "All" || tipoAtiv === tp;
+      if (!matchTipo) return;
+
+      const corr = String(row["Banco/Corretora"] || "").trim();
+      const matchCorretora = c === "All" || corr === c;
+      if (!matchCorretora) return;
 
       const parts = row["Data"] ? row["Data"].split('/') : [];
       if (parts.length !== 3) return;
@@ -371,15 +426,117 @@ export default function App() {
   }, [allData, filterTicker, filterYear, filterMonth]);
 
   const computedYields = useMemo(() => {
-    if (!filteredData) return "R$ 0,00";
+    if (!allData) return "R$ 0,00";
     let sumYields = 0;
-    filteredData.forEach(r => {
-      if (r["Yields"]) {
-        sumYields += parseMoney(r["Yields"]);
+    allData.forEach(row => {
+      const parts = row["Data"] ? row["Data"].split('/') : [];
+      const m = parts.length === 3 ? parts[1] : "";
+      const y = parts.length === 3 ? parts[2] : "";
+      
+      const matchYear = filterYear === "All" || y === filterYear;
+      const matchMonth = filterMonth === "All" || m === filterMonth;
+      const matchTicker = filterTicker === "All" || row["Ticker"] === filterTicker;
+      
+      if (matchYear && matchMonth && matchTicker && row["Yields"]) {
+        sumYields += parseMoney(row["Yields"]);
       }
     });
     return `R$ ${sumYields.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  }, [filteredData]);
+  }, [allData, filterTicker, filterYear, filterMonth]);
+
+  const computedAllocationData = useMemo(() => {
+    if (!allData) return [];
+    const targetYM = (filterYear === "All" || filterMonth === "All") ? "999999" : filterYear + filterMonth;
+    
+    // Para alocação, pegamos o último valor de cada ticker até a data alvo
+    const latestTickerInfo = new Map<string, { value: number, type: string, broker: string }>();
+    
+    allData.forEach(row => {
+      const ticker = row["Ticker"];
+      if (!ticker || ticker.toUpperCase() === "MONTH CLOSING") return;
+      
+      const parts = row["Data"] ? row["Data"].split('/') : [];
+      if (parts.length !== 3) return;
+      const rowYM = parts[2] + parts[1];
+      
+      if (rowYM <= targetYM) {
+        const b3TotalStr = row["B3 Preço total"];
+        if (b3TotalStr && b3TotalStr !== "NOT FOUND") {
+          latestTickerInfo.set(ticker, {
+            value: parseMoney(b3TotalStr),
+            type: String(row["Tipo Atividade"] || "Outros"),
+            broker: String(row["Banco/Corretora"] || "Outros")
+          });
+        }
+      }
+    });
+
+    const aggregated = new Map<string, number>();
+    latestTickerInfo.forEach((info, ticker) => {
+      let key = ticker;
+      if (pieViewMode === 'Tipo Atividade') key = info.type;
+      if (pieViewMode === 'Banco/Corretora') key = info.broker;
+      
+      aggregated.set(key, (aggregated.get(key) || 0) + info.value);
+    });
+
+    return Array.from(aggregated.entries())
+      .map(([name, value]) => ({ name, value }))
+      .filter(item => item.value > 0)
+      .sort((a,b) => b.value - a.value);
+  }, [allData, filterYear, filterMonth, pieViewMode]);
+  
+  const COLORS = ['#2dd4bf', '#a78bfa', '#38bdf8', '#fbbf24', '#f472b6', '#34d399', '#f87171', '#818cf8'];
+
+  const computedChartData = useMemo(() => {
+    if (!allData) return [];
+    
+    // Obter datas únicas considerando o filtro global de Ticker
+    const relevantData = allData.filter(row => {
+        return filterTicker === "All" || row["Ticker"] === filterTicker;
+    });
+
+    const uniqueDates = Array.from(new Set(relevantData.map(row => row["Data"]))).filter(Boolean) as string[];
+    
+    // Ordenar cronologicamente para o gráfico
+    uniqueDates.sort((a, b) => {
+      const partsA = a.split('/');
+      const partsB = b.split('/');
+      if (partsA.length !== 3 || partsB.length !== 3) return 0;
+      return new Date(`${partsA[2]}-${partsA[1]}-${partsA[0]}`).getTime() - new Date(`${partsB[2]}-${partsB[1]}-${partsB[0]}`).getTime();
+    });
+
+    return uniqueDates.map(dateStr => {
+      const parts = dateStr.split('/');
+      const targetDateStr = parts.length === 3 ? `${parts[2]}${parts[1]}${parts[0]}` : "";
+      
+      const latestValues = new Map<string, number>();
+      
+      allData.forEach(row => {
+        const ticker = row["Ticker"];
+        if (!ticker || ticker.toUpperCase() === "MONTH CLOSING") return;
+        
+        // Se houver um ticker selecionado, só computamos ele
+        const matchTicker = filterTicker === "All" || ticker === filterTicker;
+        if (!matchTicker) return;
+
+        const rParts = row["Data"] ? String(row["Data"]).split('/') : [];
+        if (rParts.length === 3) {
+          const rowDateStr = `${rParts[2]}${rParts[1]}${rParts[0]}`;
+          if (rowDateStr <= targetDateStr) {
+             const b3TotalStr = row["B3 Preço total"];
+             if (b3TotalStr && String(b3TotalStr).trim() !== "" && b3TotalStr !== "NOT FOUND") {
+               latestValues.set(ticker, parseMoney(b3TotalStr));
+             }
+          }
+        }
+      });
+      
+      let sum = 0;
+      latestValues.forEach(val => sum += val);
+      return { Data: dateStr, "B3 Preço Total": sum };
+    });
+  }, [allData, filterTicker]);
 
   return (
     <div className="relative min-h-screen text-slate-100 flex justify-center bg-transparent">
@@ -425,29 +582,99 @@ export default function App() {
           onClick={() => setActiveTab('dashboard')}
           className={`flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold transition-all ${
             activeTab === 'dashboard' 
-              ? 'bg-[var(--color-accent-cyan)]/20 text-[var(--color-accent-cyan)] shadow-[inset_0_0_12px_rgba(45,212,191,0.2)] border border-[var(--color-accent-cyan)]/30' 
-              : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+              ? 'bg-[var(--color-accent-cyan)]/20 text-[#11538d] shadow-[inset_0_0_12px_rgba(45,212,191,0.2)] border border-[var(--color-accent-cyan)]/30' 
+              : 'text-[#11538d] hover:bg-white/5 border border-transparent'
           }`}
         >
-          <LayoutDashboard className="w-5 h-5" />
-          <span className="hidden sm:inline">Dashboard</span>
+          <LayoutDashboard className="w-5 h-5 text-[#11538d]" />
+          <span className="hidden sm:inline text-[#11538d]">Dashboard</span>
         </button>
-        <div className="w-px h-6 bg-white/10 mx-1"></div>
+        <div className="w-px h-6 bg-[#11538d]/20 mx-1"></div>
+        <button 
+          onClick={() => setActiveTab('historico')}
+          className={`flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold transition-all ${
+            activeTab === 'historico' 
+              ? 'bg-[var(--color-accent-teal)]/20 text-[#11538d] shadow-[inset_0_0_12px_rgba(45,212,191,0.2)] border border-[var(--color-accent-teal)]/30' 
+              : 'text-[#11538d] hover:bg-white/5 border border-transparent'
+          }`}
+        >
+          <FileSpreadsheet className="w-5 h-5 text-[#11538d]" />
+          <span className="hidden sm:inline text-[#11538d]">Histórico</span>
+        </button>
+        <div className="w-px h-6 bg-[#11538d]/20 mx-1"></div>
         <button 
           onClick={() => setActiveTab('entrada')}
           className={`flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold transition-all ${
             activeTab === 'entrada' 
-              ? 'bg-[var(--color-accent-violet)]/20 text-[var(--color-accent-violet)] shadow-[inset_0_0_12px_rgba(167,139,250,0.2)] border border-[var(--color-accent-violet)]/30' 
-              : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+              ? 'bg-[var(--color-accent-violet)]/20 text-[#11538d] shadow-[inset_0_0_12px_rgba(167,139,250,0.2)] border border-[var(--color-accent-violet)]/30' 
+              : 'text-[#11538d] hover:bg-white/5 border border-transparent'
           }`}
         >
-          <PlusSquare className="w-5 h-5" />
-          <span className="hidden sm:inline">Nova Entrada</span>
+          <PlusSquare className="w-5 h-5 text-[#11538d]" />
+          <span className="hidden sm:inline text-[#11538d]">Nova Entrada</span>
         </button>
       </motion.nav>
 
       {/* Main Content Area */}
       <main className="w-full max-w-5xl px-6 pt-32 pb-36 flex flex-col gap-8 relative z-10 mx-auto">
+
+        <AnimatePresence mode="wait">
+          {(activeTab === 'dashboard' || activeTab === 'historico') && (
+            <motion.div 
+              key="global-filters"
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="glass-panel px-4 sm:px-6 py-4 rounded-[20px] sm:rounded-[24px] flex flex-col sm:flex-row items-start sm:items-center justify-start sm:justify-between gap-4 z-20 shadow-[0_8px_32px_rgba(0,0,0,0.2)]"
+            >
+              <div className="flex overflow-x-auto w-full custom-scrollbar pb-2 sm:pb-0 items-center justify-start sm:justify-end gap-3 sm:gap-6">
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="p-1.5 bg-cyan-500/10 rounded-lg">
+                    <Filter className="w-4 h-4 text-cyan-500" />
+                  </div>
+                  <span className="text-[10px] sm:text-xs font-semibold text-slate-400 uppercase tracking-wider">Ticker</span>
+                  <select 
+                    value={filterTicker}
+                    onChange={(e) => setFilterTicker(e.target.value)}
+                    disabled={!allData}
+                    className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[5rem] px-3 h-[38px] text-sm text-cyan-500 font-bold focus:outline-none focus:ring-1 focus:ring-cyan-500 cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
+                  >
+                    <option value="All" className="bg-slate-900 text-white">Todos</option>
+                    {tickers.map(t => <option key={t} value={t} className="bg-slate-900 text-white">{t}</option>)}
+                  </select>
+                </div>
+
+                <div className="w-px h-6 bg-white/5 mx-1"></div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Mês</span>
+                  <select 
+                    value={filterMonth}
+                    onChange={(e) => setFilterMonth(e.target.value)}
+                    disabled={!allData}
+                    className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[4rem] px-3 h-[38px] text-sm text-violet-700 font-bold focus:outline-none focus:ring-1 focus:ring-violet-700 cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
+                  >
+                    <option value="All" className="bg-slate-900 text-white">Todos</option>
+                    {months.map(m => <option key={m} value={m} className="bg-slate-900 text-white">{monthNames[m] || m}</option>)}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Ano</span>
+                  <select 
+                    value={filterYear}
+                    onChange={(e) => setFilterYear(e.target.value)}
+                    disabled={!allData}
+                    className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[4rem] px-3 h-[38px] text-sm text-violet-700 font-bold focus:outline-none focus:ring-1 focus:ring-violet-700 cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
+                  >
+                    <option value="All" className="bg-slate-900 text-white">Todos</option>
+                    {years.map(y => <option key={String(y)} value={String(y)} className="bg-slate-900 text-white">{y}</option>)}
+                  </select>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' ? (
@@ -458,58 +685,6 @@ export default function App() {
               exit={{ opacity: 0, x: -20 }}
               className="flex flex-col gap-8"
             >
-              {/* Global Filters */}
-              <div className="glass-panel px-4 sm:px-6 py-4 rounded-[20px] sm:rounded-[24px] flex flex-col sm:flex-row items-start sm:items-center justify-start sm:justify-between gap-4 z-20 shadow-[0_8px_32px_rgba(0,0,0,0.2)]">
-                <div className="flex items-center gap-3 w-full sm:w-auto shrink-0 border-b sm:border-0 border-white/10 pb-3 sm:pb-0">
-                  <div className="p-2 bg-[var(--color-accent-cyan)]/10 rounded-lg">
-                    <Filter className="w-5 h-5 text-[var(--color-accent-cyan)]" />
-                  </div>
-                  <span className="font-semibold text-slate-200">Visão Geral</span>
-                </div>
-                
-                <div className="flex overflow-x-auto w-full custom-scrollbar pb-2 sm:pb-0 items-center justify-start sm:justify-end gap-3 sm:gap-6">
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[10px] sm:text-xs font-semibold text-slate-400 uppercase tracking-wider">Ativo</span>
-                    <select 
-                      value={filterTicker}
-                      onChange={(e) => setFilterTicker(e.target.value)}
-                      disabled={!allData}
-                      className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[5rem] px-3 h-[38px] text-sm text-[var(--color-accent-cyan)] font-bold focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-cyan)] cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
-                    >
-                      <option value="All" className="bg-slate-900 text-white">Todos</option>
-                      {tickers.map(t => <option key={t} value={t} className="bg-slate-900 text-white">{t}</option>)}
-                    </select>
-                  </div>
-                  
-                  <div className="w-px h-6 bg-white/10 hidden sm:block"></div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Mês</span>
-                    <select 
-                      value={filterMonth}
-                      onChange={(e) => setFilterMonth(e.target.value)}
-                      disabled={!allData}
-                      className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[4rem] px-3 h-[38px] text-sm text-[var(--color-accent-violet)] font-bold focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-violet)] cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
-                    >
-                      <option value="All" className="bg-slate-900 text-white">Todos</option>
-                      {months.map(m => <option key={m} value={m} className="bg-slate-900 text-white">{monthNames[m] || m}</option>)}
-                    </select>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Ano</span>
-                    <select 
-                      value={filterYear}
-                      onChange={(e) => setFilterYear(e.target.value)}
-                      disabled={!allData}
-                      className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[4rem] px-3 h-[38px] text-sm text-[var(--color-accent-violet)] font-bold focus:outline-none focus:ring-1 focus:ring-[var(--color-accent-violet)] cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
-                    >
-                      <option value="All" className="bg-slate-900 text-white">Todos</option>
-                      {years.map(y => <option key={String(y)} value={String(y)} className="bg-slate-900 text-white">{y}</option>)}
-                    </select>
-                  </div>
-                </div>
-              </div>
 
               {/* Dashboard Panels Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
@@ -519,7 +694,7 @@ export default function App() {
                   <div className="absolute -top-12 -right-12 w-32 h-32 bg-[var(--color-accent-violet)] rounded-full blur-[60px] opacity-30 pointer-events-none"></div>
                   
                   <div className="flex items-center gap-3 w-full relative z-10">
-                    <span className="text-xs tracking-wide uppercase sm:text-sm font-medium text-slate-300">Patrimônio Total</span>
+                    <span className="text-xs tracking-wide uppercase sm:text-sm font-medium text-slate-300">Portfólio</span>
                   </div>
                   
                   <div className="z-10">
@@ -556,7 +731,7 @@ export default function App() {
                 </div>
 
                 {/* Var Mês Card */}
-                <div className="glass-panel p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] flex flex-col justify-between relative overflow-hidden h-full lg:col-span-1 border-t-2 border-t-emerald-500/20">
+                <div className="glass-panel p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] flex flex-col justify-between relative overflow-hidden h-full lg:col-span-2 border-t-2 border-t-emerald-500/20">
                   <div className="absolute -bottom-10 -right-10 w-24 h-24 bg-emerald-500/50 rounded-full blur-[50px] opacity-20 pointer-events-none"></div>
                   <div className="flex items-center gap-3 mb-2 z-10">
                     <span className="text-xs tracking-wide uppercase sm:text-sm font-medium text-slate-300">% Var Mês</span>
@@ -569,7 +744,7 @@ export default function App() {
                 </div>
 
                 {/* Var YTD Card */}
-                <div className="glass-panel p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] flex flex-col justify-between relative overflow-hidden h-full lg:col-span-1 border-t-2 border-t-blue-500/20">
+                <div className="glass-panel p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] flex flex-col justify-between relative overflow-hidden h-full lg:col-span-2 border-t-2 border-t-blue-500/20">
                   <div className="absolute -bottom-10 -right-10 w-24 h-24 bg-blue-500/50 rounded-full blur-[50px] opacity-20 pointer-events-none"></div>
                   <div className="flex items-center gap-3 mb-2 z-10">
                     <span className="text-xs tracking-wide uppercase sm:text-sm font-medium text-slate-300">% Var YTD</span>
@@ -580,25 +755,30 @@ export default function App() {
                     </h2>
                   </div>
                 </div>
+              </div>
 
-                {/* Chart Section */}
-                <div className="glass-panel p-4 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-4 h-full lg:col-span-4">
+              {/* Charts Section on Dashboard */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                {/* Evolution Line Chart */}
+                <div className="glass-panel p-4 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-4 h-[350px] lg:col-span-1">
                   <div className="flex justify-between items-center mb-2">
                     <h3 className="font-semibold text-lg flex items-center gap-2">
-                      <Activity className="w-5 h-5 text-[var(--color-accent-teal)]" />
+                      <Activity className="w-5 h-5 text-[var(--color-accent-cyan)]" />
                       Desempenho Geral
                     </h3>
                   </div>
                   
                   <div className="flex-1 w-full -ml-4 min-h-[120px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={mockChartData}>
+                      <AreaChart data={computedChartData}>
                         <defs>
                           <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="var(--color-accent-cyan)" stopOpacity={0.4}/>
                             <stop offset="95%" stopColor="var(--color-accent-cyan)" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
+                        <XAxis dataKey="Data" hide={true} />
                         <Tooltip 
                           contentStyle={{ 
                             backgroundColor: 'rgba(13, 27, 42, 0.8)', 
@@ -608,10 +788,12 @@ export default function App() {
                             color: '#fff'
                           }} 
                           itemStyle={{ color: '#fff' }}
+                          labelStyle={{ color: '#aaa', marginBottom: '4px' }}
+                          formatter={(value: number) => [`R$ ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}`, 'Total']}
                         />
                         <Area 
-                          type="monotone" 
-                          dataKey="value" 
+                          type="natural" 
+                          dataKey="B3 Preço Total" 
                           stroke="var(--color-accent-cyan)" 
                           strokeWidth={3}
                           fillOpacity={1} 
@@ -621,8 +803,81 @@ export default function App() {
                     </ResponsiveContainer>
                   </div>
                 </div>
-              </div>
 
+                {/* Allocation Pie Chart */}
+                <div className="glass-panel p-4 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-6 h-[auto] min-h-[550px] lg:col-span-1">
+                  <div className="flex justify-between items-center mb-2">
+                    <h3 className="font-semibold text-lg flex items-center gap-2 shrink-0">
+                      <PieChartIcon className="w-5 h-5 text-[var(--color-accent-violet)]" />
+                      Alocação
+                    </h3>
+                  </div>
+                  
+                  <div className="flex flex-col md:flex-row gap-6 flex-1">
+                    {/* Lateral View Selection Buttons */}
+                    <div className="flex flex-row md:flex-col gap-2 shrink-0 md:w-32 lg:w-40 overflow-x-auto md:overflow-x-visible pb-2 md:pb-0 custom-scrollbar">
+                      {(['Ticker', 'Tipo Atividade', 'Banco/Corretora'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          onClick={() => setPieViewMode(mode)}
+                          className={`flex-1 md:flex-none w-full px-4 h-[38px] rounded-xl text-sm font-bold transition-all backdrop-blur-md border outline-none text-left flex items-center whitespace-nowrap ${
+                            pieViewMode === mode 
+                              ? 'bg-white/10 border-cyan-500/50 text-cyan-500 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)]' 
+                              : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10'
+                          }`}
+                        >
+                          {mode === 'Ticker' ? 'Ticker' : mode === 'Tipo Atividade' ? 'Atividade' : 'Corretora'}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex-1 w-full relative min-h-[350px]">
+                      {computedAllocationData.length > 0 ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <PieChart>
+                            <Pie
+                              data={computedAllocationData}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={60}
+                              outerRadius={100}
+                              paddingAngle={2}
+                              dataKey="value"
+                              stroke="none"
+                              label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                            >
+                              {computedAllocationData.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                              ))}
+                            </Pie>
+                            <Tooltip 
+                              contentStyle={{ 
+                                backgroundColor: 'rgba(13, 27, 42, 0.8)', 
+                                border: '1px solid rgba(255,255,255,0.1)',
+                                borderRadius: '12px',
+                                backdropFilter: 'blur(8px)',
+                                color: '#fff'
+                              }}
+                              formatter={(value: number) => [`R$ ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}`, 'Valor']}
+                            />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : (
+                         <div className="w-full h-full flex items-center justify-center text-slate-500 font-medium text-sm">Nenhum dado com saldo positivo</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          ) : activeTab === 'historico' ? (
+            <motion.div 
+              key="historico"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              className="flex flex-col gap-8 w-full"
+            >
               {/* Assets List or Parsed CSV Data Table */}
               <div className="pb-10 w-full">
                 {filteredData ? (
@@ -689,21 +944,21 @@ export default function App() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     
                     <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium text-slate-400">Data</label>
+                      <label className="text-sm font-medium text-[#11538d]">Data</label>
                       <input 
                         type="date" 
                         value={formDate}
                         onChange={(e) => setFormDate(e.target.value)}
-                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
+                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
                       />
                     </div>
                     
                     <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium text-slate-400">Ticker/Ativo</label>
+                      <label className="text-sm font-medium text-[#11538d]">Ticker/Ativo</label>
                       <select 
                         value={formTicker}
                         onChange={(e) => setFormTicker(e.target.value)}
-                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none"
+                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none"
                       >
                         <option value="" disabled className="bg-slate-900 text-white">Selecione um Ativo</option>
                         {tickers.map(t => <option key={t} value={t} className="bg-slate-900 text-white">{t}</option>)}
@@ -715,17 +970,17 @@ export default function App() {
                           placeholder="Digite o novo Ticker/Ação" 
                           value={formNewTicker}
                           onChange={(e) => setFormNewTicker(e.target.value)}
-                          className="bg-white/5 border border-[var(--color-accent-cyan)]/50 rounded-xl p-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] mt-1 animate-in fade-in slide-in-from-top-2" 
+                          className="bg-white/5 border border-[var(--color-accent-cyan)]/50 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] mt-1 animate-in fade-in slide-in-from-top-2" 
                         />
                       )}
                     </div>
                     
                     <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium text-slate-400">Transação</label>
+                      <label className="text-sm font-medium text-[#11538d]">Transação</label>
                       <select 
                         value={formTransacao}
                         onChange={(e) => setFormTransacao(e.target.value)}
-                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-white focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none"
+                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none"
                       >
                         <option value="Compra" className="bg-slate-900 text-white">Compra</option>
                         <option value="Venda" className="bg-slate-900 text-white">Venda</option>
@@ -737,50 +992,63 @@ export default function App() {
                       </select>
                     </div>
 
+                    <div className="flex flex-col gap-2">
+                      <label className="text-sm font-medium text-[#11538d]">Tipo Atividade</label>
+                      <select 
+                        value={formTipoAtividade}
+                        onChange={(e) => setFormTipoAtividade(e.target.value)}
+                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none"
+                      >
+                        <option value="" disabled className="bg-slate-900 text-white">Selecione a Atividade</option>
+                        {atividades.map(a => <option key={a} value={a} className="bg-slate-900 text-white">{a}</option>)}
+                        <option value="NEW" className="bg-slate-900 text-[var(--color-accent-cyan)] font-semibold">Adicionar nova atividade...</option>
+                      </select>
+                      {formTipoAtividade === "NEW" && (
+                        <input 
+                          type="text" 
+                          placeholder="Digite a nova Atividade" 
+                          value={formNewTipoAtividade}
+                          onChange={(e) => setFormNewTipoAtividade(e.target.value)}
+                          className="bg-white/5 border border-[var(--color-accent-cyan)]/50 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] mt-1 animate-in fade-in slide-in-from-top-2" 
+                        />
+                      )}
+                    </div>
+
                     {isTrade ? (
-                      <>
-                        <div className="flex flex-col gap-2">
-                          <label className="text-sm font-medium text-slate-400">UN (Quantidade)</label>
-                          <input 
-                            type="number" 
-                            step="any"
-                            value={formUn}
-                            onChange={(e) => setFormUn(e.target.value)}
-                            placeholder="Qtd." 
-                            className="bg-white/5 border border-white/10 rounded-xl p-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
-                          />
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <label className="text-sm font-medium text-slate-400">Preço Un de Custo</label>
-                          <input 
-                            type="text" 
-                            value={formPrecoUn}
-                            onChange={(e) => setFormPrecoUn(e.target.value)}
-                            placeholder="R$ 0,00" 
-                            className="bg-white/5 border border-white/10 rounded-xl p-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
-                          />
-                        </div>
-                      </>
+                      <div className="flex flex-col gap-2">
+                        <label className="text-sm font-medium text-[#11538d]">UN (Quantidade)</label>
+                        <input 
+                          type="number" 
+                          step="any"
+                          inputMode="decimal"
+                          value={formUn}
+                          onChange={(e) => setFormUn(e.target.value)}
+                          placeholder="Qtd." 
+                          className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
+                        />
+                      </div>
                     ) : (
                       <>
                         <div className="flex flex-col gap-2">
-                          <label className="text-sm font-medium text-slate-400">Yields</label>
+                          <label className="text-sm font-medium text-[#11538d]">Yields</label>
                           <input 
                             type="text" 
+                            inputMode="decimal"
                             value={formYields}
                             onChange={(e) => setFormYields(e.target.value)}
                             placeholder="R$ 0,00" 
-                            className="bg-white/5 border border-white/10 rounded-xl p-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)]" 
+                            className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)]" 
                           />
                         </div>
                         <div className="flex flex-col gap-2">
-                          <label className="text-sm font-medium text-slate-400">IR (Imposto de Renda)</label>
+                          <label className="text-sm font-medium text-[#11538d]">IR (Imposto de Renda)</label>
                           <input 
                             type="text" 
+                            inputMode="decimal"
                             value={formIr}
                             onChange={(e) => setFormIr(e.target.value)}
                             placeholder="R$ 0,00" 
-                            className="bg-white/5 border border-white/10 rounded-xl p-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)]" 
+                            className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)]" 
                           />
                         </div>
                       </>
@@ -789,25 +1057,52 @@ export default function App() {
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-2">
                     <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium text-slate-400">Corretora/Banco (Opcional)</label>
+                      <label className="text-sm font-medium text-[#11538d]">Corretora/Banco (Opcional)</label>
                       <input 
                         type="text" 
                         value={formCorretora}
                         onChange={(e) => setFormCorretora(e.target.value)}
                         placeholder="Ex: NuInvest, Banco Inter" 
-                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
+                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
                       />
                     </div>
                     <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium text-slate-400">CNPJ (Opcional)</label>
+                      <label className="text-sm font-medium text-[#11538d]">CNPJ (Opcional)</label>
                       <input 
                         type="text" 
+                        inputMode="numeric"
+                        pattern="[0-9.\-/\\]*"
                         value={formCnpj}
                         onChange={(e) => setFormCnpj(e.target.value)}
                         placeholder="00.000.000/0000-00" 
-                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
+                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
                       />
                     </div>
+
+                    {isTrade && (
+                      <>
+                        <div className="flex flex-col gap-2">
+                          <label className="text-sm font-medium text-[#11538d]">Preço Un de Custo</label>
+                          <input 
+                            type="text" 
+                            inputMode="decimal"
+                            value={formPrecoUn}
+                            onChange={(e) => setFormPrecoUn(e.target.value)}
+                            placeholder="R$ 0,00" 
+                            className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
+                          />
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <label className="text-sm font-medium text-[#11538d]">Total do Custo</label>
+                          <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold pointer-events-none">
+                            R$ {(
+                                (parseFloat(formUn) || 0) * 
+                                (parseFloat(formPrecoUn.replace(',', '.')) || 0)
+                              ).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                   
                   <button type="button" className="mt-4 w-full py-4 bg-gradient-to-r from-[var(--color-accent-cyan)]/20 to-[var(--color-accent-teal)]/20 hover:from-[var(--color-accent-cyan)]/30 hover:to-[var(--color-accent-teal)]/30 border border-white/10 rounded-2xl font-bold text-white transition-all flex justify-center items-center gap-2 group shadow-[0_0_15px_rgba(255,255,255,0.05)] hover:shadow-[0_0_20px_rgba(255,255,255,0.1)]">
