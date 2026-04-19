@@ -59,7 +59,7 @@ body {
   padding-right: env(safe-area-inset-right);
 }
 
-/* Ambient Background Blobs */
+/* Ambient Background Blobs with Custom Image Overlay */
 .bg-blobs {
   position: fixed;
   top: 0;
@@ -68,8 +68,10 @@ body {
   height: 100vh;
   z-index: -1;
   background-image: 
-    radial-gradient(circle at 15% 50%, rgba(167, 139, 250, 0.15), transparent 40%),
-    radial-gradient(circle at 85% 30%, rgba(56, 189, 248, 0.15), transparent 40%),
-    radial-gradient(circle at 50% 80%, rgba(45, 212, 191, 0.1), transparent 50%);
+    linear-gradient(to bottom, rgba(10, 15, 30, 0.8), rgba(10, 15, 30, 0.9)),
+    url('/bg-app.png');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
   background-color: var(--color-glass-base);
 }
