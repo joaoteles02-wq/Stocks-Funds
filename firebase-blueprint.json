@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "InvestmentRecord": {
+      "title": "Registro de Investimento",
+      "description": "Uma linha de transação ou fechamento de mês de um ativo.",
+      "type": "object",
+      "properties": {
+        "Data": { "type": "string", "description": "Formato DD/MM/YYYY" },
+        "Ticker": { "type": "string" },
+        "Un": { "type": "string" },
+        "Preço Un": { "type": "string" },
+        "Yields": { "type": "string" },
+        "IR": { "type": "string" },
+        "Banco/Corretora": { "type": "string" },
+        "Tipo Atividade": { "type": "string" },
+        "CNPJ": { "type": "string" },
+        "Transação": { "type": "string" },
+        "B3 Preço total": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["Data", "Ticker", "userId"]
+    },
+    "UserSettings": {
+      "title": "Configurações do Usuário",
+      "description": "Configurações SaaS como ID da planilha e tokens de integração.",
+      "type": "object",
+      "properties": {
+        "spreadsheetId": { "type": "string" },
+        "sheetsConnected": { "type": "boolean" },
+        "sheetsTokens": { "type": "object" },
+        "lastSynced": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/investments/{investId}": {
+      "schema": "InvestmentRecord",
+      "description": "Coleção global de investimentos filtrada por userId nas regras de segurança."
+    },
+    "/users/{userId}/config/sheets": {
+      "schema": "UserSettings",
+      "description": "Configurações privadas de integração com Google Sheets por usuário."
+    }
+  }
+}

@@ -1,0 +1,52 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // reusable helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Pillar 2: Validation Blueprint
+    function isValidInvestment(data) {
+      return data.Data is string && data.Data.size() <= 20 
+          && data.Ticker is string && data.Ticker.size() <= 20
+          && data.userId == request.auth.uid;
+    }
+
+    match /investments/{investId} {
+      // Pillar 3: Path Hardening
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      // Pillar 8: Secure List Queries
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      allow create: if isSignedIn() 
+                    && isValidInvestment(request.resource.data)
+                    && request.resource.data.userId == request.auth.uid;
+
+      allow update: if isSignedIn() 
+                    && resource.data.userId == request.auth.uid
+                    && isValidInvestment(request.resource.data)
+                    && request.resource.data.userId == request.auth.uid;
+
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    match /users/{userId}/config/sheets {
+      allow read, write: if isOwner(userId);
+    }
+  }
+}
