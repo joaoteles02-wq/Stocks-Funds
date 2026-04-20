@@ -1,5 +1,6 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { GoogleGenAI, Type } from "@google/genai";
 import { 
   Upload, 
   Wallet, 
@@ -21,7 +22,11 @@ import {
   Settings,
   Link,
   CheckCircle2,
-  Table
+  Table,
+  RefreshCw,
+  Trash2,
+  AlertCircle,
+  HelpCircle
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -54,7 +59,8 @@ import {
   writeBatch,
   doc,
   setDoc,
-  getDoc
+  getDoc,
+  deleteDoc
 } from 'firebase/firestore';
 
 // Mock data for the chart to look nice before CSV upload
@@ -165,6 +171,8 @@ export default function App() {
 
   // Dark Mode Style Override State 
   const [useImageChart07, setUseImageChart07] = useState(false);
+  const [rowToDelete, setRowToDelete] = useState<any | null>(null);
+  const [isFetchingMarket, setIsFetchingMarket] = useState(false);
   
   // Filter States
   const [filterTicker, setFilterTicker] = useState<string>("All");
@@ -192,26 +200,96 @@ export default function App() {
 
   const isTrade = formTransacao === "Compra" || formTransacao === "Venda";
 
+  const fetchFinancialMarketInfo = async (ticker: string, date: string) => {
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      // Hoy is 2026-04-20
+      const prompt = `Atue como um analista financeiro com acesso a dados em tempo real. 
+      Hoje é dia 20/04/2026.
+      
+      Eu preciso das seguintes informações financeiras precisas para a data "${date}":
+      1. Preço de fechamento (ou cotação atual se for hoje) do ativo "${ticker}". 
+         - Se o ativo for brasileiro (ex: PETR4, VALE3, ITUB4), o preço deve ser em Reais (BRL).
+         - Se o ativo for americano (ex: AAPL, TSLA, MSFT), o preço deve ser em Dólares (USD).
+      2. Cotação do Dólar Comercial (USDBRL) para venda na data "${date}".
+      
+      Retorne APENAS um objeto JSON válido:
+      {
+        "price": number, // O preço unitário do ativo
+        "dollar": number // O valor de 1 USD em BRL (ex: 5.25)
+      }
+      
+      Use a ferramenta de busca para garantir que os valores são reais e atualizados para ${date}.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} } as any],
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              price: { type: Type.NUMBER },
+              dollar: { type: Type.NUMBER }
+            },
+            required: ["price", "dollar"]
+          }
+        }
+      });
+
+      return JSON.parse(response.text || "{}");
+    } catch (e) {
+      console.error("Gemini fetch failed", e);
+      return null;
+    }
+  };
+
   const handleSubmitOperation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
     
     setSyncing(true);
+    setIsFetchingMarket(true);
+    
     try {
       const parts = formDate.split('-');
       const formattedDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
+      const ticker = formTicker === "NEW" ? formNewTicker.toUpperCase() : formTicker.toUpperCase();
       
+      // Fetch market prices automatically
+      const marketInfo = await fetchFinancialMarketInfo(ticker, formattedDate);
+      
+      const b3PrecoUn = marketInfo?.price || 0;
+      const dollar = marketInfo?.dollar || 5.0; // Fallback se falhar
+      
+      const unNum = parseFloat(formUn) || 0;
+      const bancoCorretora = formCorretora;
+      
+      // B3 Preço total = IFERROR(IF(Banco/Corretora ="Nomad";Saldo de Un*B3 Preço Un*Dollar;Saldo de Un*B3 Preço Un);"")
+      // Aqui usamos UN da transação para o registro individual
+      let b3PrecoTotal = 0;
+      if (bancoCorretora === "Nomad") {
+        b3PrecoTotal = unNum * b3PrecoUn * dollar;
+      } else {
+        b3PrecoTotal = unNum * b3PrecoUn;
+      }
+
       const newRecord = {
         "Data": formattedDate,
-        "Ticker": formTicker === "NEW" ? formNewTicker : formTicker,
+        "Ticker": ticker,
         "Transação": formTransacao,
         "Tipo Atividade": formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade,
         "UN": isTrade ? formUn : "",
         "Preço Un de Custo": isTrade ? formPrecoUn : "",
         "Yields": !isTrade ? formYields : "",
         "IR": formIr,
-        "Banco/Corretora": formCorretora,
+        "Banco/Corretora": bancoCorretora,
         "CNPJ": formCnpj,
+        "B3 Preço Un": b3PrecoUn.toFixed(4),
+        "B3 Preço total": b3PrecoTotal.toFixed(2),
+        "Dollar": dollar.toFixed(4),
+        "Saldo de Un": unNum, // Para compatibilidade com a fórmula do usuário no futuro
         userId: user.uid,
         createdAt: serverTimestamp()
       };
@@ -238,6 +316,109 @@ export default function App() {
       alert("Erro ao registrar operação.");
     } finally {
       setSyncing(false);
+      setIsFetchingMarket(false);
+    }
+  };
+
+  const handleRefresh = () => {
+    // Refresh both Firestore and local data
+    setSyncing(true);
+    if (sheetsConnected && spreadsheetId) {
+       handleFetchFromSheets().finally(() => {
+         setTimeout(() => { setSyncing(false); }, 1000);
+       });
+    } else {
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
+    }
+  };
+
+  const handleFetchFromSheets = async () => {
+    if (!sheetsTokens || !spreadsheetId) {
+      alert("Configuração incompleta: Verifique se o Google Sheets está conectado e se o ID da planilha foi informado.");
+      return;
+    }
+
+    setSyncing(true);
+    try {
+      const cleanId = spreadsheetId.includes('/d/') 
+        ? spreadsheetId.split('/d/')[1].split('/')[0] 
+        : spreadsheetId.trim();
+
+      const resp = await fetch('/api/sheets/get', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          spreadsheetId: cleanId,
+          tokens: sheetsTokens
+        })
+      });
+      
+      if (!resp.ok) {
+        const err = await resp.json();
+        throw new Error(err.error || "Falha na resposta do servidor");
+      }
+
+      const data = await resp.json();
+      
+      if (data.values && data.values.length > 1) {
+        const headers = data.values[0].map((h: string) => normalizeHeader(h));
+        const rows = data.values.slice(1).map((row: any[]) => {
+          const obj: any = {};
+          headers.forEach((h: string, index: number) => {
+            obj[h] = row[index] || "";
+          });
+          return obj;
+        });
+
+        // Merge and process
+        setAllData(prev => {
+          const current = prev || [];
+          return processDataPure([...current, ...rows]);
+        });
+        
+        alert(`Sincronizado! ${rows.length} registros encontrados na planilha.`);
+      } else {
+        alert("A planilha parece estar vazia ou não contém o cabeçalho correto.");
+      }
+    } catch (error) {
+      console.error("Error fetching from sheets:", error);
+      alert(error instanceof Error ? `Erro: ${error.message}` : "Erro desconhecido ao carregar dados da planilha.");
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const handleDeleteRecord = async () => {
+    if (!rowToDelete) return;
+
+    try {
+      if (rowToDelete.id) {
+        // From Firestore
+        setSyncing(true);
+        await deleteDoc(doc(db, "investments", rowToDelete.id));
+        setSyncing(false);
+      } else {
+        // Local Data (CSV)
+        const saved = localStorage.getItem('saved_csv_data');
+        if (saved) {
+          const results = Papa.parse(saved, { header: true, skipEmptyLines: true });
+          // Find original match for local records
+          const newData = results.data.filter((r: any) => {
+            return !(r.Ticker === rowToDelete.Ticker && r.Data === rowToDelete.Data && r.UN === String(rowToDelete.UN));
+          });
+          const newCsv = Papa.unparse(newData);
+          localStorage.setItem('saved_csv_data', newCsv);
+          
+          // Re-process local data state manually for instant update
+          setAllData(prev => prev ? prev.filter(r => r !== rowToDelete) : null);
+        }
+      }
+      setRowToDelete(null);
+    } catch (error) {
+      console.error("Delete failed", error);
+      alert("Erro ao excluir registro.");
     }
   };
 
@@ -352,6 +533,8 @@ export default function App() {
         return;
       }
 
+      alert('Uma janela de autorização foi aberta. Por favor, faça o login e conceda as permissões necessárias.');
+
       const messageHandler = async (event: MessageEvent) => {
         if (event.data.type === 'GOOGLE_SHEETS_AUTH_SUCCESS' && user) {
           const tokens = event.data.tokens;
@@ -376,11 +559,28 @@ export default function App() {
   };
 
   const saveSpreadsheetId = async () => {
-    if (user) {
+    if (!user) {
+      alert("Você precisa estar logado para salvar configurações.");
+      return;
+    }
+    
+    try {
+      setSyncing(true);
+      const cleanId = spreadsheetId.includes('/d/') 
+        ? spreadsheetId.split('/d/')[1].split('/')[0] 
+        : spreadsheetId.trim();
+
       await setDoc(doc(db, 'users', user.uid, 'config', 'sheets'), {
-        spreadsheetId: spreadsheetId
+        spreadsheetId: cleanId
       }, { merge: true });
-      alert('Configuração salva com sucesso!');
+      
+      setSpreadsheetId(cleanId);
+      alert('ID da planilha salvo com sucesso!');
+    } catch (e) {
+      console.error("Save config failed", e);
+      alert("Erro ao salvar configuração na nuvem.");
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -1090,6 +1290,13 @@ export default function App() {
           {user ? (
             <>
               <button 
+                onClick={handleRefresh}
+                className="p-2.5 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 text-cyan-500 rounded-xl transition-all flex items-center justify-center group"
+                title="Atualizar Dados"
+              >
+                <RefreshCw className={`w-5 h-5 group-hover:rotate-180 transition-transform duration-700 ${syncing ? 'animate-spin' : ''}`} />
+              </button>
+              <button 
                 onClick={() => setUseImageChart07(!useImageChart07)}
                 className="flex p-2.5 bg-slate-500/10 hover:bg-slate-500/20 border border-slate-500/30 text-slate-300 rounded-xl transition-all items-center justify-center group"
                 title="Alternar Modo Escuro"
@@ -1103,31 +1310,9 @@ export default function App() {
               <button 
                 onClick={() => setShowSettings(!showSettings)}
                 className="p-2.5 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 text-violet-500 rounded-xl transition-all flex items-center justify-center group shadow-[0_0_15px_rgba(139,92,246,0.15)]"
-                title="Configurações de integração"
+                title="Configurações e Ações"
               >
                 <Settings className={`w-5 h-5 transition-transform duration-500 ${showSettings ? 'rotate-90' : 'group-hover:rotate-45'}`} />
-              </button>
-              <button 
-                onClick={handleSyncToCloud}
-                disabled={syncing || !allData}
-                className="p-2.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-500 rounded-xl transition-all flex items-center justify-center group shadow-[0_0_15px_rgba(245,158,11,0.15)] disabled:opacity-50"
-                title="Sincronizar com Nuvem"
-              >
-                {syncing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Cloud className="w-5 h-5 group-hover:scale-110 transition-transform" />}
-              </button>
-              <button 
-                onClick={handleExportCSV}
-                className="p-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-500 rounded-xl transition-all flex items-center justify-center group shadow-[0_0_15px_rgba(16,185,129,0.15)]"
-                title="Exportar Planilha"
-              >
-                <Download className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
-              </button>
-              <button 
-                onClick={handleLogout}
-                className="p-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 rounded-xl transition-all flex items-center justify-center group shadow-[0_0_15px_rgba(239,68,68,0.15)]"
-                title="Sair"
-              >
-                <LogOut className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
               </button>
               <div className="hidden sm:block glass-button p-1 rounded-full overflow-hidden">
                 <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-[var(--color-accent-violet)] to-[var(--color-accent-teal)] p-[2px]">
@@ -1204,6 +1389,43 @@ export default function App() {
       <main className="w-full max-w-5xl px-6 pt-32 pb-36 flex flex-col gap-8 relative z-10 mx-auto">
         
         <AnimatePresence>
+          {rowToDelete && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.9 }}
+                className="glass-panel p-8 rounded-[32px] max-w-sm w-full border border-rose-500/30 flex flex-col items-center gap-6 text-center"
+              >
+                <div className="w-16 h-16 bg-rose-500/20 rounded-full flex items-center justify-center">
+                  <AlertCircle className="w-8 h-8 text-rose-500" />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold mb-2">Confirmar Exclusão?</h3>
+                  <p className="text-slate-400 text-sm leading-relaxed">
+                    Você está prestes a apagar este registro de <b>{rowToDelete.Ticker}</b> ({rowToDelete.Data}). Esta ação não pode ser desfeita.
+                  </p>
+                </div>
+                <div className="flex gap-4 w-full">
+                  <button 
+                    onClick={() => setRowToDelete(null)}
+                    className="flex-1 px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl font-bold transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    onClick={handleDeleteRecord}
+                    className="flex-1 px-4 py-3 bg-rose-500 hover:bg-rose-600 rounded-2xl font-bold text-white shadow-lg shadow-rose-500/20 transition-all"
+                  >
+                    Excluir
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        <AnimatePresence>
           {showSettings && (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
@@ -1259,10 +1481,50 @@ export default function App() {
                         Salvar
                       </button>
                     </div>
+                    {sheetsConnected && (
+                      <button 
+                        onClick={handleFetchFromSheets}
+                        disabled={syncing}
+                        className="w-full mt-2 py-2 bg-cyan-500/20 border border-cyan-500/40 rounded-xl text-xs font-bold hover:bg-cyan-500/30 transition-all flex items-center justify-center gap-2"
+                      >
+                        {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                        Sincronizar dados da Planilha
+                      </button>
+                    )}
                     <p className="text-[10px] text-slate-500 italic">
                       Dica: O ID é a parte da URL entre '/d/' e '/edit'. Ex: docs.google.com/spreadsheets/d/<b>SEU_ID_AQUI</b>/edit
                     </p>
                   </div>
+                </div>
+
+                {/* Quick Actions moved here */}
+                <div className="mt-4 pt-6 border-t border-white/10 flex flex-wrap items-center gap-4">
+                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest w-full mb-1">Ações de Conta & Dados</h4>
+                  
+                  <button 
+                    onClick={handleSyncToCloud}
+                    disabled={syncing || !allData}
+                    className="flex-1 min-w-[140px] p-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-500 rounded-xl transition-all flex items-center justify-center gap-2 group disabled:opacity-50"
+                  >
+                    {syncing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Cloud className="w-5 h-5 group-hover:scale-110 transition-transform" />}
+                    <span className="text-sm font-bold">Sincronizar Nuvem</span>
+                  </button>
+
+                  <button 
+                    onClick={handleExportCSV}
+                    className="flex-1 min-w-[140px] p-3 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-500 rounded-xl transition-all flex items-center justify-center gap-2 group"
+                  >
+                    <Download className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
+                    <span className="text-sm font-bold">Exportar CSV</span>
+                  </button>
+
+                  <button 
+                    onClick={handleLogout}
+                    className="flex-1 min-w-[140px] p-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 rounded-xl transition-all flex items-center justify-center gap-2 group"
+                  >
+                    <LogOut className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
+                    <span className="text-sm font-bold">Sair da Conta</span>
+                  </button>
                 </div>
               </div>
             </motion.div>
@@ -1599,16 +1861,26 @@ export default function App() {
                                    {colName}
                                  </th>
                                ))}
+                               <th className="p-4 font-semibold text-rose-500 border-b border-white/10 text-center">Ações</th>
                              </tr>
                            </thead>
                            <tbody className="divide-y divide-white/5">
-                             {filteredData.map((row, i) => (
-                               <tr key={i} className="hover:bg-white/5 transition-colors">
+                             {filteredData.map((row, index) => (
+                               <tr key={index} className="hover:bg-white/5 transition-colors group">
                                  {REQUIRED_COLUMNS.map((colKey, j) => (
                                    <td key={j} className="p-4 text-slate-300 font-medium">
                                      {row[colKey] ? String(row[colKey]) : '-'}
                                    </td>
                                  ))}
+                                 <td className="p-4 text-slate-300 font-medium transition-colors text-center">
+                                   <button 
+                                     onClick={() => setRowToDelete(row)}
+                                     className="p-2 hover:bg-rose-500/20 text-rose-500 rounded-lg transition-all"
+                                     title="Excluir Registro"
+                                   >
+                                     <Trash2 className="w-4 h-4" />
+                                   </button>
+                                 </td>
                                </tr>
                              ))}
                            </tbody>
@@ -1808,11 +2080,25 @@ export default function App() {
                   <div className="flex items-center gap-3 mt-4">
                     <button 
                       type="submit" 
-                      disabled={syncing}
+                      disabled={syncing || isFetchingMarket}
                       className="flex-1 py-4 bg-gradient-to-r from-[var(--color-accent-cyan)]/20 to-[var(--color-accent-teal)]/20 hover:from-[var(--color-accent-cyan)]/30 hover:to-[var(--color-accent-teal)]/30 border border-white/10 rounded-2xl font-bold text-white transition-all flex justify-center items-center gap-2 group shadow-[0_0_15px_rgba(255,255,255,0.05)] hover:shadow-[0_0_20px_rgba(255,255,255,0.1)] disabled:opacity-50"
                     >
-                      {syncing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" />}
-                      {syncing ? "Processando..." : "Registrar Operação"}
+                      {isFetchingMarket ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          Consultando Mercado...
+                        </>
+                      ) : syncing ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          Processando...
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                          Registrar Operação
+                        </>
+                      )}
                     </button>
                     <button 
                       type="button" 

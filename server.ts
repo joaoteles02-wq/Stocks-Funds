@@ -115,6 +115,34 @@ app.post("/api/sheets/append", async (req, res) => {
   }
 });
 
+// API para buscar dados do Google Sheets
+app.post("/api/sheets/get", async (req, res) => {
+  const { spreadsheetId, tokens } = req.body;
+  
+  if (!tokens || !spreadsheetId) {
+    return res.status(400).json({ error: "Parâmetros ausentes." });
+  }
+
+  const auth = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  auth.setCredentials(tokens);
+
+  const sheets = google.sheets({ version: "v4", auth });
+  
+  try {
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId: spreadsheetId as string,
+      range: "A:Z", // Lê todas as colunas
+    });
+    res.json({ values: response.data.values });
+  } catch (error) {
+    console.error("Error getting sheet values:", error);
+    res.status(500).json({ error: "Erro ao ler a planilha. Verifique se o ID está correto e se você deu permissão." });
+  }
+});
+
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
