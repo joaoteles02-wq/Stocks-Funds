@@ -100,7 +100,8 @@ app.post("/api/sheets/append", async (req, res) => {
   const sheets = google.sheets({ version: "v4", auth });
   
   try {
-    await sheets.spreadsheets.values.append({
+    console.log(`Attempting to append to sheet: ${spreadsheetId}`);
+    const appendResult = await sheets.spreadsheets.values.append({
       spreadsheetId,
       range: "A1",
       valueInputOption: "USER_ENTERED",
@@ -108,10 +109,14 @@ app.post("/api/sheets/append", async (req, res) => {
         values: [rowData]
       }
     });
+    console.log("Append result:", appendResult.status);
     res.json({ success: true });
   } catch (error) {
     console.error("Error appending to sheet:", error);
-    res.status(500).json({ error: "Erro ao escrever na planilha." });
+    res.status(500).json({ 
+      error: "Erro ao escrever na planilha.", 
+      details: error instanceof Error ? error.message : String(error)
+    });
   }
 });
 

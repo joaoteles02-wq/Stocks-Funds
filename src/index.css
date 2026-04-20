@@ -75,3 +75,10 @@ body {
   background-repeat: no-repeat;
   background-color: var(--color-glass-base);
 }
+
+@media (max-width: 640px) {
+  .bg-blobs {
+    background-size: 200% auto; /* Aumenta a escala no celular */
+    background-position: center top;
+  }
+}

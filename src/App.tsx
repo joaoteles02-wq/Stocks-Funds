@@ -100,37 +100,37 @@ const normalizeHeader = (header: string) => {
   
   if (norm.includes('dollar') || norm.includes('dolar') || norm.includes('dólar')) return 'Dollar';
   
-  if (norm === 'date' || norm === 'data' || norm.startsWith('data') || norm.includes('negócio') || norm.includes('negocio') || norm.includes('pregao') || norm.includes('pregão') || norm === 'dia' || norm.includes('liquidação') || norm.includes('liquidacao')) return 'Data';
+  if (norm === 'date' || norm === 'data' || norm.startsWith('data') || norm.includes('negôcio') || norm.includes('negócio') || norm.includes('negocio') || norm.includes('pregao') || norm.includes('pregão') || norm === 'dia' || norm.includes('liquidação') || norm.includes('liquidacao')) return 'Data';
   
   if (norm === 'ticker' || norm === 'ativo' || norm === 'papel' || norm.includes('código') || norm.includes('codigo') || norm.includes('instrumento') || norm.includes('produto') || norm.includes('símbolo') || norm.includes('simbolo') || norm.includes('ação') || norm.includes('acao')) return 'Ticker';
   
-  if (norm.includes('transation') || norm.includes('transaction') || norm.includes('transação') || norm.includes('transacao') || norm.includes('operação') || norm.includes('operacao') || norm.includes('movimentação') || norm.includes('tipo de ordem')) return 'Transação';
+  if (norm.includes('transation') || norm.includes('transaction') || norm.includes('transação') || norm.includes('transacao') || norm.includes('operação') || norm.includes('operacao') || norm.includes('movimentação') || norm.includes('tipo de ordem') || norm === 'tipo' || norm === 'movimentacao') return 'Transação';
   
-  if (norm.includes('stock proceeds') || norm.includes('yields') || norm.includes('rendimentos') || norm.includes('proventos') || norm.includes('dividendos') || norm.includes('juros') || norm.includes('jcp') || norm === 'valor bruto') return 'Yields';
+  if (norm.includes('stock proceeds') || norm.includes('yields') || norm.includes('rendimentos') || norm.includes('proventos') || norm.includes('dividendos') || norm.includes('juros') || norm.includes('jcp') || norm === 'valor bruto' || norm === 'rendimento') return 'Yields';
   
-  if (norm === 'units' || norm === 'un' || norm === 'unit' || norm.includes('quantidade') || norm.includes('qtd') || norm === 'volume') return 'UN';
+  if (norm === 'units' || norm === 'un' || norm === 'unit' || norm.includes('quantidade') || norm.includes('qtd') || norm === 'volume' || norm === 'quantidade (un)') return 'UN';
   
-  if (norm.includes('balance units') || norm.includes('saldo de un') || norm.includes('saldo un') || norm.includes('quantidade acumulada')) return 'Saldo de Un';
+  if (norm.includes('balance units') || norm.includes('saldo de un') || norm.includes('saldo un') || norm.includes('quantidade acumulada') || norm.includes('saldo de un.')) return 'Saldo de Un';
   
   if (norm.includes('b3') && (norm.includes('unit') || norm.includes('un'))) return 'B3 Preço Un';
   
   if (norm.includes('b3') && (norm.includes('total') || norm.includes('val'))) return 'B3 Preço total';
   
-  if (norm.includes('cost unit') || norm.includes('preço un') || norm.includes('preco un') || norm.includes('valor unitário') || norm.includes('preco unitario') || norm.includes('preço unitário') || norm === 'preço' || norm === 'preco') return 'Preço Un de Custo';
+  if (norm.includes('cost unit') || norm.includes('preço un') || norm.includes('preco un') || norm.includes('valor unitário') || norm.includes('preco unitario') || norm.includes('preço unitário') || norm === 'preço' || norm === 'preco' || norm === 'custo un') return 'Preço Un de Custo';
   
-  if (norm.includes('total cost') && !norm.includes('balance') || norm.includes('valor total') || norm.includes('valor da operação') || norm.includes('valor liquido') || norm.includes('valor líquido')) return 'Total do Custo';
+  if ((norm.includes('total cost') || norm.includes('custo total')) && !norm.includes('balance') || norm.includes('valor total') || norm.includes('valor da operação') || norm.includes('valor liquido') || norm.includes('valor líquido')) return 'Total do Custo';
   
-  if (norm.includes('balance total cost') || norm.includes('saldo custo') || norm.includes('custo total acumulado')) return 'Saldo Custo';
+  if (norm.includes('balance total cost') || norm.includes('saldo custo') || norm.includes('custo total acumulado') || norm.includes('saldo de custo')) return 'Saldo Custo';
   
-  if (norm.includes('avarage price') || norm.includes('average price') || norm.includes('preço médio') || norm.includes('preco medio') || norm === 'pm') return 'Preço Médio';
+  if (norm.includes('avarage price') || norm.includes('average price') || norm.includes('preço médio') || norm.includes('preco medio') || norm === 'pm' || norm === 'preço medio') return 'Preço Médio';
   
-  if (norm.includes('instrument type') || norm.includes('tipo atividade') || norm.includes('categoria') || norm.includes('tipo de ativo') || norm.includes('mercado') || norm.includes('especificação')) return 'Tipo Atividade';
+  if (norm.includes('instrument type') || norm.includes('tipo atividade') || norm.includes('categoria') || norm.includes('tipo de ativo') || norm.includes('mercado') || norm.includes('especificação') || norm === 'classe') return 'Tipo Atividade';
   
-  if (norm.includes('investment broker') || norm.includes('banco/corretora') || norm.includes('corretora') || norm.includes('instituição') || norm.includes('instituicao') || norm.includes('agente')) return 'Banco/Corretora';
+  if (norm.includes('investment broker') || norm.includes('banco/corretora') || norm.includes('corretora') || norm.includes('instituição') || norm.includes('instituicao') || norm.includes('agente') || norm === 'banco') return 'Banco/Corretora';
   
   if (norm === 'cnpj') return 'CNPJ';
   
-  if (norm === 'ir' || norm.includes('imposto') || norm.includes('irrf') || norm === 'taxa') return 'IR';
+  if (norm === 'ir' || norm.includes('imposto') || norm.includes('irrf') || norm === 'taxa' || norm === 'imposto de renda') return 'IR';
   
   if (norm.includes('overall month')) return 'OverAll Month';
   
@@ -138,7 +138,7 @@ const normalizeHeader = (header: string) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'entrada' | 'historico'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'entrada' | 'historico' | 'swing-trade'>('dashboard');
   const [tableColumns, setTableColumns] = useState<string[]>([]);
 
   // Auth State
@@ -173,11 +173,22 @@ export default function App() {
   const [useImageChart07, setUseImageChart07] = useState(false);
   const [rowToDelete, setRowToDelete] = useState<any | null>(null);
   const [isFetchingMarket, setIsFetchingMarket] = useState(false);
+  const [swingTradeData, setSwingTradeData] = useState<Record<string, { 
+    currentPrice: number, 
+    perfWeek: number | string,
+    perfMonth: number | string,
+    perfYear: number | string,
+    perfYTD: number | string
+  }>>({});
+  const [isFetchingSwing, setIsFetchingSwing] = useState(false);
   
   // Filter States
+  const currentYear = new Date().getFullYear().toString();
+  const currentMonth = (new Date().getMonth() + 1).toString().padStart(2, '0');
+  
   const [filterTicker, setFilterTicker] = useState<string>("All");
-  const [filterYear, setFilterYear] = useState<string>("All");
-  const [filterMonth, setFilterMonth] = useState<string>("All");
+  const [filterYear, setFilterYear] = useState<string>(currentYear);
+  const [filterMonth, setFilterMonth] = useState<string>(currentMonth);
   const [filterTipoAtividade, setFilterTipoAtividade] = useState<string>("All");
   const [pieViewMode, setPieViewMode] = useState<'Ticker' | 'Tipo Atividade' | 'Banco/Corretora'>('Ticker');
   
@@ -242,6 +253,113 @@ export default function App() {
     } catch (e) {
       console.error("Gemini fetch failed", e);
       return null;
+    }
+  };
+
+  const fetchSwingTradeBatch = async (tickersToFetch: string[]) => {
+    if (tickersToFetch.length === 0) return;
+    setIsFetchingSwing(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      // Use standard B3 suffix for better search results if they look like B3 tickers
+      const formattedTickers = tickersToFetch.map(t => {
+        const clean = t.trim().toUpperCase();
+        // Brazilian B3 tickers are usually 4 or 5 chars starting with letters and ending with numbers
+        if (/^[A-Z]{4}[0-9]{1,2}$/.test(clean)) {
+          return `${clean}.SA`;
+        }
+        return clean;
+      });
+
+      const prompt = `Atue como um analista financeiro experiente especializado no mercado brasileiro (B3/Bovespa) e internacional. 
+      Hoje é 20/04/2026.
+      
+      Eu preciso das seguintes cotações precisas para os ativos: ${formattedTickers.join(', ')}.
+      
+      Observação: Ativos terminando em .SA pertencem à B3 (Brasil).
+      
+      Períodos necessários:
+      1. Preço atual (20/04/2026).
+      2. Preço de 7 dias atrás (em torno de 13/04/2026).
+      3. Preço de 31 dias atrás (em torno de 20/03/2026).
+      4. Preço de 365 dias atrás (em torno de 20/04/2025).
+      5. Preço no início deste ano (02/01/2026).
+      
+      Retorne um objeto JSON onde as chaves são os Tickers ORIGINAIS passados (sem o .SA): ${tickersToFetch.join(', ')}.
+      Os valores devem ser objetos com os campos numéricos. Se não encontrar um valor, retorne 0.
+      
+      Use a ferramenta Google Search para validar os preços reais de fechamento nessas datas. Procure por sites como Yahoo Finance, Bloomberg ou o site oficial da B3.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-1.5-flash",
+        contents: prompt,
+        config: {
+          tools: [{ googleSearch: {} } as any],
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            additionalProperties: {
+              type: Type.OBJECT,
+              properties: {
+                current: { type: Type.NUMBER },
+                hist7d: { type: Type.NUMBER },
+                hist31d: { type: Type.NUMBER },
+                hist365d: { type: Type.NUMBER },
+                histYTD: { type: Type.NUMBER }
+              },
+              required: ["current", "hist7d", "hist31d", "hist365d", "histYTD"]
+            }
+          }
+        }
+      });
+
+      const rawText = response.text || "{}";
+      const raw = JSON.parse(rawText);
+      const updatedData = { ...swingTradeData };
+      
+      // Normalize raw keys for better matching
+      const normalizedRaw: Record<string, any> = {};
+      Object.keys(raw).forEach(key => {
+        const normKey = key.trim().toUpperCase().replace(/\.SA$/, '');
+        normalizedRaw[normKey] = raw[key];
+      });
+
+      tickersToFetch.forEach(t => {
+        const cleanT = t.trim().toUpperCase();
+        const data = normalizedRaw[cleanT];
+        
+        if (data && typeof data.current === 'number' && data.current > 0) {
+          const cur = data.current;
+          const calcPerf = (old: any) => {
+            if (typeof cur === 'number' && cur > 0 && typeof old === 'number' && old > 0) {
+              return (cur / old) - 1;
+            }
+            return "NOT FOUND";
+          };
+
+          updatedData[t] = { 
+            currentPrice: cur,
+            perfWeek: calcPerf(data.hist7d),
+            perfMonth: calcPerf(data.hist31d),
+            perfYear: calcPerf(data.hist365d),
+            perfYTD: calcPerf(data.histYTD)
+          };
+        } else {
+          updatedData[t] = {
+            currentPrice: 0,
+            perfWeek: "NOT FOUND",
+            perfMonth: "NOT FOUND",
+            perfYear: "NOT FOUND",
+            perfYTD: "NOT FOUND"
+          };
+        }
+      });
+      
+      setSwingTradeData(updatedData);
+    } catch (e) {
+      console.error("Swing fetch failed", e);
+    } finally {
+      setIsFetchingSwing(false);
     }
   };
 
@@ -587,19 +705,31 @@ export default function App() {
   const handleAppendToSheets = async (record: any) => {
     if (!sheetsTokens || !spreadsheetId) return;
 
+    const cleanId = spreadsheetId.includes('/d/') 
+      ? spreadsheetId.split('/d/')[1].split('/')[0] 
+      : spreadsheetId.trim();
+
     // Map record to array matching COLUMNS
     const rowDataArr = REQUIRED_COLUMNS.map(col => record[col] || "");
 
     try {
-      await fetch('/api/sheets/append', {
+      const resp = await fetch('/api/sheets/append', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tokens: sheetsTokens,
-          spreadsheetId: spreadsheetId,
+          spreadsheetId: cleanId,
           rowData: rowDataArr
         })
       });
+      
+      if (!resp.ok) {
+        const err = await resp.json();
+        console.error("Sheets Append Error:", err);
+        alert(`Aviso: O registro foi salvo no App, mas não pôde ser enviado para o Google Sheets: ${err.details || err.error}`);
+      } else {
+        console.log("Successfully appended to Sheets");
+      }
     } catch (error) {
       console.error("Error writing to Sheets API:", error);
     }
@@ -971,6 +1101,13 @@ export default function App() {
     if (!allData) return [];
     return Array.from(new Set(allData.map(r => r["Ticker"]).filter(t => t && t.toUpperCase() !== 'MONTH CLOSING'))).sort();
   }, [allData]);
+
+  // Auto-fetch Swing Trade Data when tab is selected
+  useEffect(() => {
+    if (activeTab === 'swing-trade' && tickers.length > 0 && Object.keys(swingTradeData).length === 0 && !isFetchingSwing) {
+      fetchSwingTradeBatch(tickers);
+    }
+  }, [activeTab, tickers, swingTradeData, isFetchingSwing]);
 
   const atividades = useMemo(() => {
     if (!allData) return [];
@@ -1373,6 +1510,18 @@ export default function App() {
         </button>
         <div className="w-px h-6 bg-[var(--color-accent-teal)]/20 mx-1"></div>
         <button 
+          onClick={() => setActiveTab('swing-trade')}
+          className={`flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold transition-all ${
+            activeTab === 'swing-trade' 
+              ? 'bg-[var(--color-accent-cyan)]/20 text-[var(--color-accent-teal)] shadow-[inset_0_0_12px_rgba(45,212,191,0.2)] border border-[var(--color-accent-cyan)]/30' 
+              : 'text-[var(--color-accent-teal)] hover:bg-white/5 border border-transparent'
+          }`}
+        >
+          <Activity className="w-5 h-5 text-[var(--color-accent-teal)]" />
+          <span className="hidden sm:inline text-[var(--color-accent-teal)]">Swing Trade</span>
+        </button>
+        <div className="w-px h-6 bg-[var(--color-accent-teal)]/20 mx-1"></div>
+        <button 
           onClick={() => setActiveTab('entrada')}
           className={`flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold transition-all ${
             activeTab === 'entrada' 
@@ -1476,8 +1625,14 @@ export default function App() {
                       />
                       <button 
                         onClick={saveSpreadsheetId}
-                        className="px-4 py-2 bg-violet-500/20 border border-violet-500/40 rounded-xl text-xs font-bold hover:bg-violet-500/30 transition-all"
+                        disabled={syncing}
+                        className={`px-4 py-2 border rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                          syncing 
+                            ? 'bg-slate-500/20 border-slate-500/40 text-slate-500' 
+                            : 'bg-violet-500/20 border-violet-500/40 text-violet-400 hover:bg-violet-500/40'
+                        }`}
                       >
+                        {syncing && <Loader2 className="w-3 h-3 animate-spin" />}
                         Salvar
                       </button>
                     </div>
@@ -1485,7 +1640,11 @@ export default function App() {
                       <button 
                         onClick={handleFetchFromSheets}
                         disabled={syncing}
-                        className="w-full mt-2 py-2 bg-cyan-500/20 border border-cyan-500/40 rounded-xl text-xs font-bold hover:bg-cyan-500/30 transition-all flex items-center justify-center gap-2"
+                        className={`w-full mt-2 py-2 border rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                          syncing 
+                            ? 'bg-slate-500/20 border-slate-500/40 text-slate-500' 
+                            : 'bg-cyan-500/20 border-cyan-500/40 text-cyan-400 hover:bg-cyan-500/40'
+                        }`}
                       >
                         {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                         Sincronizar dados da Planilha
@@ -1897,6 +2056,98 @@ export default function App() {
                     </p>
                   </div>
                 )}
+              </div>
+            </motion.div>
+          ) : activeTab === 'swing-trade' ? (
+            <motion.div 
+              key="swing-trade"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="flex flex-col gap-6 w-full"
+            >
+              <div className="flex justify-between items-center px-2">
+                <div>
+                  <h2 className="text-2xl font-bold flex items-center gap-2">
+                    <Activity className="w-6 h-6 text-[var(--color-accent-teal)]" />
+                    Swing Trade
+                  </h2>
+                  <p className="text-slate-400 text-sm">Monitoramento de ativos e performance semanal</p>
+                </div>
+                <button
+                  onClick={() => fetchSwingTradeBatch(tickers)}
+                  disabled={isFetchingSwing || tickers.length === 0}
+                  className="px-6 py-3 bg-[var(--color-accent-teal)]/10 hover:bg-[var(--color-accent-teal)]/20 border border-[var(--color-accent-teal)]/30 text-[var(--color-accent-teal)] rounded-2xl font-bold transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isFetchingSwing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  {isFetchingSwing ? 'Atualizando...' : 'Atualizar Cotações'}
+                </button>
+              </div>
+
+              <div className="glass-panel p-2 rounded-[24px]">
+                <div className="w-full max-h-[600px] overflow-auto custom-scrollbar rounded-[20px]">
+                  <table className="w-full text-left text-sm whitespace-nowrap border-collapse min-w-max relative">
+                    <thead className="sticky top-0 z-20 backdrop-blur-3xl bg-slate-900/60 shadow-[0_2px_10px_rgba(0,0,0,0.5)]">
+                      <tr>
+                        <th className="p-4 font-semibold text-[var(--color-accent-cyan)] border-b border-white/10 uppercase tracking-wider">Ticker</th>
+                        <th className="p-4 font-semibold text-[var(--color-accent-teal)] border-b border-white/10 uppercase tracking-wider">B3 Preço Un</th>
+                        <th className="p-4 font-semibold text-[var(--color-accent-violet)] border-b border-white/10 uppercase tracking-wider">Semana</th>
+                        <th className="p-4 font-semibold text-[var(--color-accent-violet)] border-b border-white/10 uppercase tracking-wider">Mês</th>
+                        <th className="p-4 font-semibold text-[var(--color-accent-violet)] border-b border-white/10 uppercase tracking-wider">12 meses</th>
+                        <th className="p-4 font-semibold text-[var(--color-accent-violet)] border-b border-white/10 uppercase tracking-wider">YTD</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {tickers.length > 0 ? tickers.map((ticker) => {
+                        const info = swingTradeData[ticker];
+                        
+                        const renderPerf = (perf: any) => {
+                          if (!info) return <span className="text-slate-500 italic">-</span>;
+                          if (typeof perf === 'number') {
+                            return (
+                              <span className={perf >= 0 ? "text-emerald-400" : "text-rose-400"}>
+                                {perf >= 0 ? '+' : ''}{(perf * 100).toFixed(2)}%
+                              </span>
+                            );
+                          }
+                          return <span className="text-slate-500 uppercase text-[10px]">{perf}</span>;
+                        };
+
+                        return (
+                          <tr key={ticker} className="hover:bg-white/5 transition-colors group">
+                            <td className="p-4 text-white font-bold">{ticker}</td>
+                            <td className="p-4 text-slate-300">
+                              {isFetchingSwing && !info ? (
+                                <div className="flex items-center gap-2 text-slate-500 italic">
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                  Buscando...
+                                </div>
+                              ) : info && info.currentPrice > 0 ? (
+                                <span className="font-mono text-white">
+                                  R$ {info.currentPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              ) : info && info.currentPrice === 0 ? (
+                                <span className="text-rose-500/70 font-bold uppercase text-[10px]">NOT FOUND</span>
+                              ) : (
+                                <span className="text-slate-500 italic">Aguardando atualização...</span>
+                              )}
+                            </td>
+                            <td className="p-4 font-medium">{renderPerf(info?.perfWeek)}</td>
+                            <td className="p-4 font-medium">{renderPerf(info?.perfMonth)}</td>
+                            <td className="p-4 font-medium">{renderPerf(info?.perfYear)}</td>
+                            <td className="p-4 font-medium">{renderPerf(info?.perfYTD)}</td>
+                          </tr>
+                        );
+                      }) : (
+                        <tr>
+                          <td colSpan={6} className="p-12 text-center text-slate-500 italic">
+                            Nenhum ativo encontrado no histórico para monitorar.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </motion.div>
           ) : (
