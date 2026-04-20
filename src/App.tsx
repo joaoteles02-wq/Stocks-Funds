@@ -304,8 +304,13 @@ export default function App() {
   }, []);
 
   const processData = (data: any[]) => {
-    const valid = processDataPure(data);
-    setAllData(valid);
+    setAllData(prev => {
+      const current = prev || [];
+      const newItems = processDataPure(data);
+      if (current.length === 0) return newItems;
+      // Mescla e passa novamente pelo Pure para reordenar e desduplicar
+      return processDataPure([...current, ...newItems]);
+    });
     setTableColumns(REQUIRED_COLUMNS);
   };
 
@@ -423,10 +428,8 @@ export default function App() {
     if (!user || !allData || syncing) return;
     setSyncing(true);
     try {
-      const batch = writeBatch(db);
-      // Simplified: Just push new docs if they don't have an ID
-      // Real SaaS would check for duplicates, here we just push the current state
-      // if it's coming from a fresh CSV upload
+      let batch = writeBatch(db);
+      
       let count = 0;
       for (const row of allData) {
         if (!row.id) {
@@ -439,6 +442,7 @@ export default function App() {
           count++;
           if (count >= 400) { // Firestore batch limit is 500
              await batch.commit();
+             batch = writeBatch(db); // Create a new batch after commit
              count = 0;
           }
         }
@@ -586,12 +590,14 @@ export default function App() {
           y = p[0]; m = p[1]; d = p[2];
         } else { // DD-MM-YYYY or DD-MM-YY
           d = p[0]; m = p[1]; y = p[2];
-          if (y.length === 2) y = "20" + y;
+        }
+        if (y && y.length === 2) {
+           // Safe fallback to 2000s
+           y = "20" + y;
         }
       }
       
       if (d && m && y) {
-        if (y.length === 2) y = "20" + y;
         return `${String(d).padStart(2, '0')}/${String(m).padStart(2, '0')}/${y}`;
       }
       return s;
@@ -633,12 +639,12 @@ export default function App() {
                       transacao.includes("RENDIMENTO") || transacao.includes("JURO") || transacao.includes("DIVIDEND") || transacao.includes("JCP");
                       
       if (isYield) {
+        // Reduzimos a assinatura para ignorar textos de transação que podem 
+        // diferir por 1 letra (causando o duplicado de 58.10)
         parts = [
           row["Data"],
           row["Ticker"],
-          row["Transação"],
           row["Banco/Corretora"],
-          tipoAtiv,
           row["_yields_fixed"]
         ];
       } else {
@@ -1449,13 +1455,13 @@ export default function App() {
                                   data={computedAllocationData}
                                   cx="50%"
                                   cy="50%"
-                                  innerRadius={55}
-                                  outerRadius={80}
+                                  innerRadius={40}
+                                  outerRadius={85}
                                   paddingAngle={2}
                                   dataKey="value"
                                   stroke="none"
-                                  labelLine={false}
-                                  label={({ name, percent }) => percent > 0.10 ? `${name}` : ""}
+                                  labelLine={{ stroke: 'rgba(255,255,255,0.2)', strokeWidth: 1 }}
+                                  label={({ name, percent }) => percent > 0.05 ? `${name} ${(percent * 100).toFixed(0)}%` : ""}
                                 >
                                   {computedAllocationData.map((entry, index) => (
                                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
@@ -1476,32 +1482,30 @@ export default function App() {
                             </ResponsiveContainer>
                           </div>
                           
-                          {/* Legend with Percentages specifically for Ticker mode */}
-                          {pieViewMode === 'Ticker' && (
-                            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 px-2 pb-4">
-                              {computedAllocationData.slice(0, 10).map((item, idx) => {
-                                const total = computedAllocationData.reduce((acc, curr) => acc + curr.value, 0);
-                                const percentage = ((item.value / total) * 100).toFixed(1);
-                                return (
-                                  <div key={item.name} className="flex items-center justify-between gap-1 border-b border-white/5 pb-0.5">
-                                    <div className="flex items-center gap-1.5 overflow-hidden">
-                                      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
-                                      <span className="text-sm text-slate-300 truncate">{item.name}</span>
-                                    </div>
-                                    <span className="text-sm text-[var(--color-accent-teal)] font-semibold whitespace-nowrap">{percentage}%</span>
+                          {/* Legend with Percentages specifically for all modes */}
+                          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 px-2 pb-4">
+                            {computedAllocationData.slice(0, 10).map((item, idx) => {
+                              const total = computedAllocationData.reduce((acc, curr) => acc + curr.value, 0);
+                              const percentage = ((item.value / total) * 100).toFixed(1);
+                              return (
+                                <div key={item.name} className="flex items-center justify-between gap-1 border-b border-white/5 pb-0.5">
+                                  <div className="flex items-center gap-1.5 overflow-hidden">
+                                    <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
+                                    <span className="text-sm text-slate-300 truncate">{item.name}</span>
                                   </div>
-                                );
-                              })}
-                              {computedAllocationData.length > 10 && (
-                                <div className="flex items-center justify-between border-b border-white/5 pb-0.5 opacity-50">
-                                  <div className="flex items-center gap-1.5">
-                                    <div className="w-2 h-2 rounded-full shrink-0 bg-slate-600"></div>
-                                    <span className="text-sm text-slate-400">Outros</span>
-                                  </div>
+                                  <span className="text-sm text-[var(--color-accent-teal)] font-semibold whitespace-nowrap">{percentage}%</span>
                                 </div>
-                              )}
-                            </div>
-                          )}
+                              );
+                            })}
+                            {computedAllocationData.length > 10 && (
+                              <div className="flex items-center justify-between border-b border-white/5 pb-0.5 opacity-50">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-2 h-2 rounded-full shrink-0 bg-slate-600"></div>
+                                  <span className="text-sm text-slate-400">Outros</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       ) : (
                          <div className="w-full h-full flex items-center justify-center text-slate-500 font-medium text-sm">Nenhum dado com saldo positivo</div>
