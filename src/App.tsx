@@ -93,22 +93,39 @@ const normalizeHeader = (header: string) => {
   const norm = header.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().replace(/\s+/g, ' ').toLowerCase();
   
   if (norm.includes('dollar') || norm.includes('dolar') || norm.includes('dólar')) return 'Dollar';
-  if (norm === 'date' || norm === 'data' || norm.startsWith('data') || norm.includes('data neg') || norm === 'dia') return 'Data';
-  if (norm === 'ticker' || norm === 'ativo' || norm === 'papel' || norm === 'código' || norm === 'codigo' || norm.includes('instrumento') || norm.includes('produto')) return 'Ticker';
-  if (norm.includes('transation') || norm.includes('transaction') || norm.includes('transação') || norm.includes('transacao') || norm.includes('operação') || norm.includes('movimentação')) return 'Transação';
-  if (norm.includes('stock proceeds') || norm.includes('yields') || norm.includes('rendimentos') || norm.includes('proventos') || norm.includes('dividendos')) return 'Yields';
-  if (norm === 'units' || norm === 'un' || norm === 'unit' || norm === 'quantidade' || norm === 'qtd') return 'UN';
+  
+  if (norm === 'date' || norm === 'data' || norm.startsWith('data') || norm.includes('negócio') || norm.includes('negocio') || norm.includes('pregao') || norm.includes('pregão') || norm === 'dia' || norm.includes('liquidação') || norm.includes('liquidacao')) return 'Data';
+  
+  if (norm === 'ticker' || norm === 'ativo' || norm === 'papel' || norm.includes('código') || norm.includes('codigo') || norm.includes('instrumento') || norm.includes('produto') || norm.includes('símbolo') || norm.includes('simbolo') || norm.includes('ação') || norm.includes('acao')) return 'Ticker';
+  
+  if (norm.includes('transation') || norm.includes('transaction') || norm.includes('transação') || norm.includes('transacao') || norm.includes('operação') || norm.includes('operacao') || norm.includes('movimentação') || norm.includes('tipo de ordem')) return 'Transação';
+  
+  if (norm.includes('stock proceeds') || norm.includes('yields') || norm.includes('rendimentos') || norm.includes('proventos') || norm.includes('dividendos') || norm.includes('juros') || norm.includes('jcp') || norm === 'valor bruto') return 'Yields';
+  
+  if (norm === 'units' || norm === 'un' || norm === 'unit' || norm.includes('quantidade') || norm.includes('qtd') || norm === 'volume') return 'UN';
+  
   if (norm.includes('balance units') || norm.includes('saldo de un') || norm.includes('saldo un') || norm.includes('quantidade acumulada')) return 'Saldo de Un';
+  
   if (norm.includes('b3') && (norm.includes('unit') || norm.includes('un'))) return 'B3 Preço Un';
+  
   if (norm.includes('b3') && (norm.includes('total') || norm.includes('val'))) return 'B3 Preço total';
-  if (norm.includes('cost unit') || norm.includes('preço un') || norm.includes('preco un') || norm.includes('valor unitário') || norm.includes('preço unitário')) return 'Preço Un de Custo';
-  if (norm.includes('total cost') && !norm.includes('balance') || norm.includes('valor total') || norm.includes('valor da operação')) return 'Total do Custo';
+  
+  if (norm.includes('cost unit') || norm.includes('preço un') || norm.includes('preco un') || norm.includes('valor unitário') || norm.includes('preco unitario') || norm.includes('preço unitário') || norm === 'preço' || norm === 'preco') return 'Preço Un de Custo';
+  
+  if (norm.includes('total cost') && !norm.includes('balance') || norm.includes('valor total') || norm.includes('valor da operação') || norm.includes('valor liquido') || norm.includes('valor líquido')) return 'Total do Custo';
+  
   if (norm.includes('balance total cost') || norm.includes('saldo custo') || norm.includes('custo total acumulado')) return 'Saldo Custo';
-  if (norm.includes('avarage price') || norm.includes('average price') || norm.includes('preço médio') || norm.includes('preco medio')) return 'Preço Médio';
-  if (norm.includes('instrument type') || norm.includes('tipo atividade') || norm.includes('categoria') || norm.includes('tipo de ativo')) return 'Tipo Atividade';
-  if (norm.includes('investment broker') || norm.includes('banco/corretora') || norm.includes('corretora') || norm.includes('instituição') || norm.includes('agente')) return 'Banco/Corretora';
+  
+  if (norm.includes('avarage price') || norm.includes('average price') || norm.includes('preço médio') || norm.includes('preco medio') || norm === 'pm') return 'Preço Médio';
+  
+  if (norm.includes('instrument type') || norm.includes('tipo atividade') || norm.includes('categoria') || norm.includes('tipo de ativo') || norm.includes('mercado') || norm.includes('especificação')) return 'Tipo Atividade';
+  
+  if (norm.includes('investment broker') || norm.includes('banco/corretora') || norm.includes('corretora') || norm.includes('instituição') || norm.includes('instituicao') || norm.includes('agente')) return 'Banco/Corretora';
+  
   if (norm === 'cnpj') return 'CNPJ';
-  if (norm === 'ir' || norm.includes('imposto')) return 'IR';
+  
+  if (norm === 'ir' || norm.includes('imposto') || norm.includes('irrf') || norm === 'taxa') return 'IR';
+  
   if (norm.includes('overall month')) return 'OverAll Month';
   
   return header.trim();
@@ -145,6 +162,9 @@ export default function App() {
   const [sheetsTokens, setSheetsTokens] = useState<any>(null);
   const [sheetsConnected, setSheetsConnected] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+
+  // Dark Mode Style Override State 
+  const [useImageChart07, setUseImageChart07] = useState(false);
   
   // Filter States
   const [filterTicker, setFilterTicker] = useState<string>("All");
@@ -584,6 +604,9 @@ export default function App() {
       let s = String(dateStr || "").trim();
       if (!s) return "01/01/2000";
       
+      // Handle formatting DD.MM.YYYY
+      s = s.replace(/\./g, '/');
+
       // Checagem extra: Excel as vezes exporta a data como número serial (ex: 45750)
       if (!s.includes('/') && !s.includes('-') && !isNaN(Number(s))) {
         const serial = Number(s);
@@ -951,7 +974,7 @@ export default function App() {
     
     allData.forEach(row => {
       const ticker = row["Ticker"];
-      if (!ticker || ticker.toUpperCase() === "MONTH CLOSING") return;
+      if (!ticker || ticker.toUpperCase() === "MONTH CLOSING" || ticker.toUpperCase() === "TOTAL") return;
       
       const parts = row["Data"] ? row["Data"].split('/') : [];
       if (parts.length !== 3) return;
@@ -962,8 +985,8 @@ export default function App() {
         if (b3TotalStr && b3TotalStr !== "NOT FOUND") {
           latestTickerInfo.set(ticker, {
             value: parseMoney(b3TotalStr),
-            type: String(row["Tipo Atividade"] || "Outros"),
-            broker: String(row["Banco/Corretora"] || "Outros")
+            type: String(row["Tipo Atividade"] || "Não Especificado"),
+            broker: String(row["Banco/Corretora"] || "Não Especificado")
           });
         }
       }
@@ -975,7 +998,9 @@ export default function App() {
       if (pieViewMode === 'Tipo Atividade') key = info.type;
       if (pieViewMode === 'Banco/Corretora') key = info.broker;
       
-      aggregated.set(key, (aggregated.get(key) || 0) + info.value);
+      if (key && key.toLowerCase() !== "outros") {
+         aggregated.set(key, (aggregated.get(key) || 0) + info.value);
+      }
     });
 
     return Array.from(aggregated.entries())
@@ -1038,7 +1063,13 @@ export default function App() {
 
   return (
     <div className="relative min-h-screen text-slate-100 flex justify-center bg-transparent">
-      <div className="bg-blobs"></div>
+      {/* Background conditionally changes based on user toggle */}
+      <div 
+        className="bg-blobs"
+        style={useImageChart07 ? {
+           backgroundImage: `linear-gradient(to bottom, rgba(10, 15, 30, 0.7), rgba(10, 15, 30, 0.9)), url('https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=1600')`
+        } : {}}
+      ></div>
       
       {/* Top Floating Header */}
       <motion.header 
@@ -1054,6 +1085,17 @@ export default function App() {
         <div className="flex gap-3 items-center">
           {user ? (
             <>
+              <button 
+                onClick={() => setUseImageChart07(!useImageChart07)}
+                className="flex p-2.5 bg-slate-500/10 hover:bg-slate-500/20 border border-slate-500/30 text-slate-300 rounded-xl transition-all items-center justify-center group"
+                title="Alternar Modo Escuro"
+              >
+                {useImageChart07 ? (
+                  <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                ) : (
+                  <svg className="w-5 h-5 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+                )}
+              </button>
               <button 
                 onClick={() => setShowSettings(!showSettings)}
                 className="p-2.5 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 text-violet-500 rounded-xl transition-all flex items-center justify-center group shadow-[0_0_15px_rgba(139,92,246,0.15)]"
@@ -1501,7 +1543,7 @@ export default function App() {
                           
                           {/* Legend with Percentages specifically for all modes */}
                           <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 px-2 pb-4">
-                            {computedAllocationData.slice(0, 10).map((item, idx) => {
+                            {computedAllocationData.map((item, idx) => {
                               const total = computedAllocationData.reduce((acc, curr) => acc + curr.value, 0);
                               const percentage = ((item.value / total) * 100).toFixed(1);
                               return (
@@ -1514,14 +1556,6 @@ export default function App() {
                                 </div>
                               );
                             })}
-                            {computedAllocationData.length > 10 && (
-                              <div className="flex items-center justify-between border-b border-white/5 pb-0.5 opacity-50">
-                                <div className="flex items-center gap-1.5">
-                                  <div className="w-2 h-2 rounded-full shrink-0 bg-slate-600"></div>
-                                  <span className="text-sm text-slate-400">Outros</span>
-                                </div>
-                              </div>
-                            )}
                           </div>
                         </div>
                       ) : (
@@ -1611,7 +1645,7 @@ export default function App() {
                         type="date" 
                         value={formDate}
                         onChange={(e) => setFormDate(e.target.value)}
-                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
+                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
                       />
                     </div>
                     
@@ -1620,7 +1654,7 @@ export default function App() {
                       <select 
                         value={formTicker}
                         onChange={(e) => setFormTicker(e.target.value)}
-                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none outline-none"
+                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none outline-none"
                       >
                         <option value="" disabled className="bg-slate-900 text-white">Selecione um Ativo</option>
                         {tickers.map(t => <option key={t} value={t} className="bg-slate-900 text-white">{t}</option>)}
@@ -1632,7 +1666,7 @@ export default function App() {
                           placeholder="Digite o novo Ticker/Ação" 
                           value={formNewTicker}
                           onChange={(e) => setFormNewTicker(e.target.value)}
-                          className="bg-white/5 backdrop-blur-md border border-[var(--color-accent-cyan)]/50 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] mt-1 animate-in fade-in slide-in-from-top-2 outline-none" 
+                          className="bg-white/5 backdrop-blur-md border border-[var(--color-accent-cyan)]/50 rounded-xl p-3 text-[#2dd4bf] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] mt-1 animate-in fade-in slide-in-from-top-2 outline-none" 
                         />
                       )}
                     </div>
@@ -1642,7 +1676,7 @@ export default function App() {
                       <select 
                         value={formTransacao}
                         onChange={(e) => setFormTransacao(e.target.value)}
-                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none outline-none"
+                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none outline-none"
                       >
                         <option value="Compra" className="bg-slate-900 text-white">Compra</option>
                         <option value="Venda" className="bg-slate-900 text-white">Venda</option>
@@ -1659,7 +1693,7 @@ export default function App() {
                       <select 
                         value={formTipoAtividade}
                         onChange={(e) => setFormTipoAtividade(e.target.value)}
-                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none outline-none"
+                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none outline-none"
                       >
                         <option value="" disabled className="bg-slate-900 text-white">Selecione a Atividade</option>
                         {atividades.map(a => <option key={a} value={a} className="bg-slate-900 text-white">{a}</option>)}
@@ -1686,7 +1720,7 @@ export default function App() {
                           value={formUn}
                           onChange={(e) => setFormUn(e.target.value)}
                           placeholder="Qtd." 
-                          className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
+                          className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
                         />
                       </div>
                     ) : (
@@ -1725,7 +1759,7 @@ export default function App() {
                         value={formCorretora}
                         onChange={(e) => setFormCorretora(e.target.value)}
                         placeholder="Ex: NuInvest, Banco Inter" 
-                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
+                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
                       />
                     </div>
                     <div className="flex flex-col gap-2">
@@ -1737,7 +1771,7 @@ export default function App() {
                         value={formCnpj}
                         onChange={(e) => setFormCnpj(e.target.value)}
                         placeholder="00.000.000/0000-00" 
-                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
+                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
                       />
                     </div>
 
@@ -1751,12 +1785,12 @@ export default function App() {
                             value={formPrecoUn}
                             onChange={(e) => setFormPrecoUn(e.target.value)}
                             placeholder="R$ 0,00" 
-                            className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
+                            className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
                           />
                         </div>
                         <div className="flex flex-col gap-2">
                           <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Total do Custo</label>
-                          <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold pointer-events-none">
+                          <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 justify-center flex items-center text-[#2dd4bf] font-bold pointer-events-none w-full min-h-[46px]">
                             R$ {(
                                 (parseFloat(formUn) || 0) * 
                                 (parseFloat(formPrecoUn.replace(',', '.')) || 0)
