@@ -89,11 +89,12 @@ const REQUIRED_COLUMNS = [
 ];
 
 const normalizeHeader = (header: string) => {
-  const norm = header.trim().replace(/\s+/g, ' ').toLowerCase();
+  // Remove BOM and invisible characters, then trim and normalize spaces
+  const norm = header.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().replace(/\s+/g, ' ').toLowerCase();
   
   if (norm.includes('dollar') || norm.includes('dolar') || norm.includes('dólar')) return 'Dollar';
-  if (norm === 'date' || norm === 'data' || norm.includes('data neg') || norm === 'dia') return 'Data';
-  if (norm === 'ticker' || norm === 'ativo' || norm === 'papel' || norm === 'código' || norm === 'codigo' || norm.includes('instrumento')) return 'Ticker';
+  if (norm === 'date' || norm === 'data' || norm.startsWith('data') || norm.includes('data neg') || norm === 'dia') return 'Data';
+  if (norm === 'ticker' || norm === 'ativo' || norm === 'papel' || norm === 'código' || norm === 'codigo' || norm.includes('instrumento') || norm.includes('produto')) return 'Ticker';
   if (norm.includes('transation') || norm.includes('transaction') || norm.includes('transação') || norm.includes('transacao') || norm.includes('operação') || norm.includes('movimentação')) return 'Transação';
   if (norm.includes('stock proceeds') || norm.includes('yields') || norm.includes('rendimentos') || norm.includes('proventos') || norm.includes('dividendos')) return 'Yields';
   if (norm === 'units' || norm === 'un' || norm === 'unit' || norm === 'quantidade' || norm === 'qtd') return 'UN';
@@ -434,20 +435,36 @@ export default function App() {
       for (const row of allData) {
         if (!row.id) {
           const newDocRef = doc(collection(db, "investments"));
+          
+          // Firebase rejeita undefined. Precisamos remover campos undef ou transformá-los em strings
+          const cleanRow = Object.fromEntries(
+            Object.entries(row).filter(([_, v]) => v !== undefined)
+          );
+
           batch.set(newDocRef, {
-            ...row,
+            ...cleanRow,
             userId: user.uid,
             createdAt: serverTimestamp()
           });
           count++;
           if (count >= 400) { // Firestore batch limit is 500
-             await batch.commit();
+             try {
+                await batch.commit();
+             } catch (err) {
+                console.error("Batch limit errored: ", err);
+             }
              batch = writeBatch(db); // Create a new batch after commit
              count = 0;
           }
         }
       }
-      if (count > 0) await batch.commit();
+      if (count > 0) {
+        try {
+          await batch.commit();
+        } catch (err) {
+          console.error("Final batch limit errored: ", err);
+        }
+      }
 
       // Optionally sync all to Sheets if connected
       if (sheetsConnected && spreadsheetId) {
@@ -1589,21 +1606,21 @@ export default function App() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                     
                     <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium text-[#11538d]">Data</label>
+                      <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Data</label>
                       <input 
                         type="date" 
                         value={formDate}
                         onChange={(e) => setFormDate(e.target.value)}
-                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
+                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
                       />
                     </div>
                     
                     <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium text-[#11538d]">Ticker/Ativo</label>
+                      <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Ticker/Ativo</label>
                       <select 
                         value={formTicker}
                         onChange={(e) => setFormTicker(e.target.value)}
-                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none"
+                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none outline-none"
                       >
                         <option value="" disabled className="bg-slate-900 text-white">Selecione um Ativo</option>
                         {tickers.map(t => <option key={t} value={t} className="bg-slate-900 text-white">{t}</option>)}
@@ -1615,17 +1632,17 @@ export default function App() {
                           placeholder="Digite o novo Ticker/Ação" 
                           value={formNewTicker}
                           onChange={(e) => setFormNewTicker(e.target.value)}
-                          className="bg-white/5 border border-[var(--color-accent-cyan)]/50 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] mt-1 animate-in fade-in slide-in-from-top-2" 
+                          className="bg-white/5 backdrop-blur-md border border-[var(--color-accent-cyan)]/50 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] mt-1 animate-in fade-in slide-in-from-top-2 outline-none" 
                         />
                       )}
                     </div>
                     
                     <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium text-[#11538d]">Transação</label>
+                      <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Transação</label>
                       <select 
                         value={formTransacao}
                         onChange={(e) => setFormTransacao(e.target.value)}
-                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none"
+                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none outline-none"
                       >
                         <option value="Compra" className="bg-slate-900 text-white">Compra</option>
                         <option value="Venda" className="bg-slate-900 text-white">Venda</option>
@@ -1638,11 +1655,11 @@ export default function App() {
                     </div>
 
                     <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium text-[#11538d]">Tipo Atividade</label>
+                      <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Tipo Atividade</label>
                       <select 
                         value={formTipoAtividade}
                         onChange={(e) => setFormTipoAtividade(e.target.value)}
-                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none"
+                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] appearance-none outline-none"
                       >
                         <option value="" disabled className="bg-slate-900 text-white">Selecione a Atividade</option>
                         {atividades.map(a => <option key={a} value={a} className="bg-slate-900 text-white">{a}</option>)}
@@ -1654,14 +1671,14 @@ export default function App() {
                           placeholder="Digite a nova Atividade" 
                           value={formNewTipoAtividade}
                           onChange={(e) => setFormNewTipoAtividade(e.target.value)}
-                          className="bg-white/5 border border-[var(--color-accent-cyan)]/50 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] mt-1 animate-in fade-in slide-in-from-top-2" 
+                          className="bg-white/5 backdrop-blur-md border border-[var(--color-accent-cyan)]/50 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] mt-1 animate-in fade-in slide-in-from-top-2 outline-none" 
                         />
                       )}
                     </div>
 
                     {isTrade ? (
                       <div className="flex flex-col gap-2">
-                        <label className="text-sm font-medium text-[#11538d]">UN (Quantidade)</label>
+                        <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">UN (Quantidade)</label>
                         <input 
                           type="number" 
                           step="any"
@@ -1669,31 +1686,31 @@ export default function App() {
                           value={formUn}
                           onChange={(e) => setFormUn(e.target.value)}
                           placeholder="Qtd." 
-                          className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
+                          className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
                         />
                       </div>
                     ) : (
                       <>
                         <div className="flex flex-col gap-2">
-                          <label className="text-sm font-medium text-[#11538d]">Yields</label>
+                          <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Yields</label>
                           <input 
                             type="text" 
                             inputMode="decimal"
                             value={formYields}
                             onChange={(e) => setFormYields(e.target.value)}
                             placeholder="R$ 0,00" 
-                            className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)]" 
+                            className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)] outline-none" 
                           />
                         </div>
                         <div className="flex flex-col gap-2">
-                          <label className="text-sm font-medium text-[#11538d]">IR (Imposto de Renda)</label>
+                          <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">IR (Imposto de Renda)</label>
                           <input 
                             type="text" 
                             inputMode="decimal"
                             value={formIr}
                             onChange={(e) => setFormIr(e.target.value)}
                             placeholder="R$ 0,00" 
-                            className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)]" 
+                            className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)] outline-none" 
                           />
                         </div>
                       </>
@@ -1702,17 +1719,17 @@ export default function App() {
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mt-2">
                     <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium text-[#11538d]">Corretora/Banco (Opcional)</label>
+                      <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Corretora/Banco (Opcional)</label>
                       <input 
                         type="text" 
                         value={formCorretora}
                         onChange={(e) => setFormCorretora(e.target.value)}
                         placeholder="Ex: NuInvest, Banco Inter" 
-                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
+                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
                       />
                     </div>
                     <div className="flex flex-col gap-2">
-                      <label className="text-sm font-medium text-[#11538d]">CNPJ (Opcional)</label>
+                      <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">CNPJ (Opcional)</label>
                       <input 
                         type="text" 
                         inputMode="numeric"
@@ -1720,26 +1737,26 @@ export default function App() {
                         value={formCnpj}
                         onChange={(e) => setFormCnpj(e.target.value)}
                         placeholder="00.000.000/0000-00" 
-                        className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
+                        className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
                       />
                     </div>
 
                     {isTrade && (
                       <>
                         <div className="flex flex-col gap-2">
-                          <label className="text-sm font-medium text-[#11538d]">Preço Un de Custo</label>
+                          <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Preço Un de Custo</label>
                           <input 
                             type="text" 
                             inputMode="decimal"
                             value={formPrecoUn}
                             onChange={(e) => setFormPrecoUn(e.target.value)}
                             placeholder="R$ 0,00" 
-                            className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold placeholder-slate-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)]" 
+                            className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
                           />
                         </div>
                         <div className="flex flex-col gap-2">
-                          <label className="text-sm font-medium text-[#11538d]">Total do Custo</label>
-                          <div className="bg-white/5 border border-white/10 rounded-xl p-3 text-black font-semibold pointer-events-none">
+                          <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Total do Custo</label>
+                          <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold pointer-events-none">
                             R$ {(
                                 (parseFloat(formUn) || 0) * 
                                 (parseFloat(formPrecoUn.replace(',', '.')) || 0)
@@ -1750,14 +1767,37 @@ export default function App() {
                     )}
                   </div>
                   
-                  <button 
-                    type="submit" 
-                    disabled={syncing}
-                    className="mt-4 w-full py-4 bg-gradient-to-r from-[var(--color-accent-cyan)]/20 to-[var(--color-accent-teal)]/20 hover:from-[var(--color-accent-cyan)]/30 hover:to-[var(--color-accent-teal)]/30 border border-white/10 rounded-2xl font-bold text-white transition-all flex justify-center items-center gap-2 group shadow-[0_0_15px_rgba(255,255,255,0.05)] hover:shadow-[0_0_20px_rgba(255,255,255,0.1)] disabled:opacity-50"
-                  >
-                    {syncing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" />}
-                    {syncing ? "Processando..." : "Registrar Operação"}
-                  </button>
+                  <div className="flex items-center gap-3 mt-4">
+                    <button 
+                      type="submit" 
+                      disabled={syncing}
+                      className="flex-1 py-4 bg-gradient-to-r from-[var(--color-accent-cyan)]/20 to-[var(--color-accent-teal)]/20 hover:from-[var(--color-accent-cyan)]/30 hover:to-[var(--color-accent-teal)]/30 border border-white/10 rounded-2xl font-bold text-white transition-all flex justify-center items-center gap-2 group shadow-[0_0_15px_rgba(255,255,255,0.05)] hover:shadow-[0_0_20px_rgba(255,255,255,0.1)] disabled:opacity-50"
+                    >
+                      {syncing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" />}
+                      {syncing ? "Processando..." : "Registrar Operação"}
+                    </button>
+                    <button 
+                      type="button" 
+                      onClick={() => {
+                        setFormDate("");
+                        setFormTicker("");
+                        setFormNewTicker("");
+                        setFormTransacao("Compra");
+                        setFormTipoAtividade("");
+                        setFormNewTipoAtividade("");
+                        setFormUn("");
+                        setFormYields("");
+                        setFormIr("");
+                        setFormCorretora("");
+                        setFormCnpj("");
+                        setFormPrecoUn("");
+                      }}
+                      className="px-6 py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl font-bold text-[var(--color-accent-teal)] transition-all flex justify-center items-center backdrop-blur-md cursor-pointer outline-none"
+                      title="Limpar Entrada"
+                    >
+                      Limpar
+                    </button>
+                  </div>
                 </form>
               </div>
             </motion.div>
