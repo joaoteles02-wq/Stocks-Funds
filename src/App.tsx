@@ -271,24 +271,23 @@ export default function App() {
         return clean;
       });
 
-      const prompt = `Atue como um analista financeiro experiente especializado no mercado brasileiro (B3/Bovespa) e internacional. 
-      Hoje é 20/04/2026.
+      const prompt = `Como um analista financeiro Sênior, eu preciso das cotações de fechamento (ou preço atual se for hoje 20/04/2026) para os seguintes tickers: ${formattedTickers.join(', ')}.
       
-      Eu preciso das seguintes cotações precisas para os ativos: ${formattedTickers.join(', ')}.
+      IMPORTANTE:
+      - Tickers terminando em .SA são da Bovespa (Brasil) e os preços DEVEM ser em REAIS (BRL). Pesquise por "cotação [ticker] b3" ou "fechamento [ticker] [data]".
+      - Tickers americanos (sem .SA) são em DÓLARES (USD).
       
-      Observação: Ativos terminando em .SA pertencem à B3 (Brasil).
+      Datas requeridas para CADA ativo:
+      1. HOJE: 20/04/2026
+      2. 7 dias atrás: 13/04/2026
+      3. 31 dias atrás: 20/03/2026
+      4. 365 dias atrás: 20/04/2025
+      5. Início de 2026: 02/01/2026
       
-      Períodos necessários:
-      1. Preço atual (20/04/2026).
-      2. Preço de 7 dias atrás (em torno de 13/04/2026).
-      3. Preço de 31 dias atrás (em torno de 20/03/2026).
-      4. Preço de 365 dias atrás (em torno de 20/04/2025).
-      5. Preço no início deste ano (02/01/2026).
+      Retorne um JSON rigoroso onde as chaves são os nomes originais (sem .SA): ${tickersToFetch.join(', ')}.
+      Exemplo de busca sugerida para a ferramenta: "VALE3.SA historical price April 20 2026".
       
-      Retorne um objeto JSON onde as chaves são os Tickers ORIGINAIS passados (sem o .SA): ${tickersToFetch.join(', ')}.
-      Os valores devem ser objetos com os campos numéricos. Se não encontrar um valor, retorne 0.
-      
-      Use a ferramenta Google Search para validar os preços reais de fechamento nessas datas. Procure por sites como Yahoo Finance, Bloomberg ou o site oficial da B3.`;
+      Se não houver dados para uma data, retorne 0.0 para esse campo específico.`;
 
       const response = await ai.models.generateContent({
         model: "gemini-1.5-flash",
@@ -1929,10 +1928,10 @@ export default function App() {
                       ))}
                     </div>
 
-                    <div className="flex-1 w-full relative min-h-[350px]">
+                    <div className="flex-1 w-full relative min-h-[300px]">
                       {computedAllocationData.length > 0 ? (
                         <div className="flex flex-col h-full">
-                          <div className="flex-1">
+                          <div className="flex-1 min-h-[250px]">
                             <ResponsiveContainer width="100%" height="100%">
                               <PieChart>
                                 <Pie
@@ -1940,7 +1939,7 @@ export default function App() {
                                   cx="50%"
                                   cy="50%"
                                   innerRadius={40}
-                                  outerRadius={85}
+                                  outerRadius={75}
                                   paddingAngle={2}
                                   dataKey="value"
                                   stroke="none"
@@ -1966,21 +1965,23 @@ export default function App() {
                             </ResponsiveContainer>
                           </div>
                           
-                          {/* Legend with Percentages specifically for all modes */}
-                          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 px-2 pb-4">
-                            {computedAllocationData.map((item, idx) => {
-                              const total = computedAllocationData.reduce((acc, curr) => acc + curr.value, 0);
-                              const percentage = ((item.value / total) * 100).toFixed(1);
-                              return (
-                                <div key={item.name} className="flex items-center justify-between gap-1 border-b border-white/5 pb-0.5">
-                                  <div className="flex items-center gap-1.5 overflow-hidden">
-                                    <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
-                                    <span className="text-sm text-slate-300 truncate">{item.name}</span>
+                          {/* Legend with Scrollable Container if too many items */}
+                          <div className="mt-4 max-h-[180px] overflow-y-auto custom-scrollbar pr-1">
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 px-2 pb-2">
+                              {computedAllocationData.map((item, idx) => {
+                                const total = computedAllocationData.reduce((acc, curr) => acc + curr.value, 0);
+                                const percentage = ((item.value / total) * 100).toFixed(1);
+                                return (
+                                  <div key={item.name} className="flex items-center justify-between gap-1 border-b border-white/5 pb-0.5">
+                                    <div className="flex items-center gap-1.5 overflow-hidden">
+                                      <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
+                                      <span className="text-[11px] sm:text-xs text-slate-300 truncate">{item.name}</span>
+                                    </div>
+                                    <span className="text-[11px] sm:text-xs text-[var(--color-accent-teal)] font-semibold whitespace-nowrap">{percentage}%</span>
                                   </div>
-                                  <span className="text-sm text-[var(--color-accent-teal)] font-semibold whitespace-nowrap">{percentage}%</span>
-                                </div>
-                              );
-                            })}
+                                );
+                              })}
+                            </div>
                           </div>
                         </div>
                       ) : (
