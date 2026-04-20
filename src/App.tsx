@@ -625,10 +625,14 @@ export default function App() {
     cleanRows.forEach(row => {
       let parts: string[] = [];
       const tipoAtiv = String(row["Tipo Atividade"] || "").trim().toUpperCase();
+      const transacao = String(row["Transação"] || "").trim().toUpperCase();
       
       // Para rendimentos, quantidade e preço muitas vezes vêm zerados de formas diferentes
       // na mesma corretora, o que quebra a desduplicação e soma duas vezes
-      if (tipoAtiv.includes("RENDIMENTO") || tipoAtiv.includes("JURO") || tipoAtiv.includes("DIVIDEND")) {
+      const isYield = tipoAtiv.includes("RENDIMENTO") || tipoAtiv.includes("JURO") || tipoAtiv.includes("DIVIDEND") ||
+                      transacao.includes("RENDIMENTO") || transacao.includes("JURO") || transacao.includes("DIVIDEND") || transacao.includes("JCP");
+                      
+      if (isYield) {
         parts = [
           row["Data"],
           row["Ticker"],
@@ -1426,8 +1430,8 @@ export default function App() {
                           onClick={() => setPieViewMode(mode)}
                           className={`flex-1 md:flex-none w-full px-4 h-[38px] rounded-xl text-sm font-bold transition-all backdrop-blur-md border outline-none text-left flex items-center whitespace-nowrap ${
                             pieViewMode === mode 
-                              ? 'bg-white/10 border-cyan-500/50 text-[#11538d] shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)]' 
-                              : 'bg-white/5 border-white/10 text-slate-400 hover:bg-white/10'
+                              ? 'bg-white/10 border-cyan-500/50 text-[var(--color-accent-teal)] shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)]' 
+                              : 'bg-white/5 border-white/10 text-[var(--color-accent-teal)] opacity-60 hover:opacity-100 hover:bg-white/10'
                           }`}
                         >
                           {mode === 'Ticker' ? 'Ticker' : mode === 'Tipo Atividade' ? 'Atividade' : 'Corretora'}
@@ -1484,7 +1488,7 @@ export default function App() {
                                       <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
                                       <span className="text-sm text-slate-300 truncate">{item.name}</span>
                                     </div>
-                                    <span className="text-sm text-[#11538d] font-semibold whitespace-nowrap">{percentage}%</span>
+                                    <span className="text-sm text-[var(--color-accent-teal)] font-semibold whitespace-nowrap">{percentage}%</span>
                                   </div>
                                 );
                               })}
