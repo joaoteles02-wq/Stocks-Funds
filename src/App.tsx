@@ -1067,10 +1067,11 @@ export default function App() {
       <div 
         className="bg-blobs"
         style={useImageChart07 ? {
-           backgroundImage: `linear-gradient(to bottom, rgba(10, 15, 30, 0.3), rgba(10, 15, 30, 0.5)), url('https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=1600')`,
+           backgroundImage: `linear-gradient(to bottom, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.15)), url('https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=1600')`,
            backgroundSize: `100% 100%, 80%`,
            backgroundRepeat: `no-repeat, repeat`,
-           backgroundPosition: `center, center`
+           backgroundPosition: `center, center`,
+           filter: `brightness(1.2)`
         } : {}}
       ></div>
       
