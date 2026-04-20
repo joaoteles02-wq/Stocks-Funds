@@ -397,16 +397,7 @@ export default function App() {
         ...doc.data()
       }));
       
-      // Sort the fetched data for consistency
-      const sortedData = [...data].sort((a: any, b: any) => {
-        const partsA = (a.Data || "").split('/');
-        const partsB = (b.Data || "").split('/');
-        if (partsA.length !== 3 || partsB.length !== 3) return 0;
-        return new Date(`${partsA[2]}-${partsA[1]}-${partsA[0]}`).getTime() - 
-               new Date(`${partsB[2]}-${partsB[1]}-${partsB[0]}`).getTime();
-      });
-      
-      setAllData(sortedData);
+      setAllData(processDataPure(data));
     });
 
     return () => unsubscribe();
@@ -485,10 +476,21 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  // Carrega automaticamente a última planilha caso você atualize a página
   useEffect(() => {
-    // Agora não retornamos se tiver 'user', apenas confiamos que o Firebase vai mesclar
-    // A inicialização principal é feita pelo useEffect[user]
+    // Restaurando arquivo em memória caso o usuário atualize a página antes de mandar pra nuvem
+    const saved = localStorage.getItem('saved_csv_data');
+    if (saved) {
+      Papa.parse(saved, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: normalizeHeader,
+        transform: (value) => value.trim(),
+        complete: (results) => {
+          setTableColumns(results.meta.fields || []);
+          processData(results.data as any[]);
+        },
+      });
+    }
   }, []);
 
   // Auto-preenchimento ao selecionar o Ticker
@@ -542,7 +544,7 @@ export default function App() {
     reader.readAsText(file);
   };
 
-  const processDataPure = (data: any[]) => {
+  function processDataPure(data: any[]) {
     if (!data) return [];
     
     const parseNum = (val: any) => {
@@ -1092,36 +1094,36 @@ export default function App() {
           onClick={() => setActiveTab('dashboard')}
           className={`flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold transition-all ${
             activeTab === 'dashboard' 
-              ? 'bg-[var(--color-accent-cyan)]/20 text-[#11538d] shadow-[inset_0_0_12px_rgba(45,212,191,0.2)] border border-[var(--color-accent-cyan)]/30' 
-              : 'text-[#11538d] hover:bg-white/5 border border-transparent'
+              ? 'bg-[var(--color-accent-cyan)]/20 text-[var(--color-accent-teal)] shadow-[inset_0_0_12px_rgba(45,212,191,0.2)] border border-[var(--color-accent-cyan)]/30' 
+              : 'text-[var(--color-accent-teal)] hover:bg-white/5 border border-transparent'
           }`}
         >
-          <LayoutDashboard className="w-5 h-5 text-[#11538d]" />
-          <span className="hidden sm:inline text-[#11538d]">Dashboard</span>
+          <LayoutDashboard className="w-5 h-5 text-[var(--color-accent-teal)]" />
+          <span className="hidden sm:inline text-[var(--color-accent-teal)]">Dashboard</span>
         </button>
-        <div className="w-px h-6 bg-[#11538d]/20 mx-1"></div>
+        <div className="w-px h-6 bg-[var(--color-accent-teal)]/20 mx-1"></div>
         <button 
           onClick={() => setActiveTab('historico')}
           className={`flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold transition-all ${
             activeTab === 'historico' 
-              ? 'bg-[var(--color-accent-teal)]/20 text-[#11538d] shadow-[inset_0_0_12px_rgba(45,212,191,0.2)] border border-[var(--color-accent-teal)]/30' 
-              : 'text-[#11538d] hover:bg-white/5 border border-transparent'
+              ? 'bg-[var(--color-accent-teal)]/20 text-[var(--color-accent-teal)] shadow-[inset_0_0_12px_rgba(45,212,191,0.2)] border border-[var(--color-accent-teal)]/30' 
+              : 'text-[var(--color-accent-teal)] hover:bg-white/5 border border-transparent'
           }`}
         >
-          <FileSpreadsheet className="w-5 h-5 text-[#11538d]" />
-          <span className="hidden sm:inline text-[#11538d]">Histórico</span>
+          <FileSpreadsheet className="w-5 h-5 text-[var(--color-accent-teal)]" />
+          <span className="hidden sm:inline text-[var(--color-accent-teal)]">Histórico</span>
         </button>
-        <div className="w-px h-6 bg-[#11538d]/20 mx-1"></div>
+        <div className="w-px h-6 bg-[var(--color-accent-teal)]/20 mx-1"></div>
         <button 
           onClick={() => setActiveTab('entrada')}
           className={`flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold transition-all ${
             activeTab === 'entrada' 
-              ? 'bg-[var(--color-accent-violet)]/20 text-[#11538d] shadow-[inset_0_0_12px_rgba(167,139,250,0.2)] border border-[var(--color-accent-violet)]/30' 
-              : 'text-[#11538d] hover:bg-white/5 border border-transparent'
+              ? 'bg-[var(--color-accent-violet)]/20 text-[var(--color-accent-teal)] shadow-[inset_0_0_12px_rgba(167,139,250,0.2)] border border-[var(--color-accent-violet)]/30' 
+              : 'text-[var(--color-accent-teal)] hover:bg-white/5 border border-transparent'
           }`}
         >
-          <PlusSquare className="w-5 h-5 text-[#11538d]" />
-          <span className="hidden sm:inline text-[#11538d]">Nova Entrada</span>
+          <PlusSquare className="w-5 h-5 text-[var(--color-accent-teal)]" />
+          <span className="hidden sm:inline text-[var(--color-accent-teal)]">Nova Entrada</span>
         </button>
       </motion.nav>
 
@@ -1241,7 +1243,7 @@ export default function App() {
                         value={filterTicker}
                         onChange={(e) => setFilterTicker(e.target.value)}
                         disabled={!allData}
-                        className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[7rem] px-4 h-[42px] text-sm text-[#11538d] font-bold focus:outline-none focus:ring-1 focus:ring-cyan-500 cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
+                        className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[7rem] px-4 h-[42px] text-sm text-[var(--color-accent-teal)] font-bold focus:outline-none focus:ring-1 focus:ring-cyan-500 cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
                       >
                         <option value="All" className="bg-slate-900 text-white">Todos</option>
                         {tickers.map(t => <option key={t} value={t} className="bg-slate-900 text-white">{t}</option>)}
@@ -1254,7 +1256,7 @@ export default function App() {
                         value={filterMonth}
                         onChange={(e) => setFilterMonth(e.target.value)}
                         disabled={!allData}
-                        className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[6rem] px-4 h-[42px] text-sm text-[#11538d] font-bold focus:outline-none focus:ring-1 focus:ring-violet-700 cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
+                        className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[6rem] px-4 h-[42px] text-sm text-[var(--color-accent-teal)] font-bold focus:outline-none focus:ring-1 focus:ring-violet-700 cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
                       >
                         <option value="All" className="bg-slate-900 text-white">Todos</option>
                         {months.map(m => <option key={m} value={m} className="bg-slate-900 text-white">{monthNames[m] || m}</option>)}
@@ -1267,7 +1269,7 @@ export default function App() {
                         value={filterYear}
                         onChange={(e) => setFilterYear(e.target.value)}
                         disabled={!allData}
-                        className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[6rem] px-4 h-[42px] text-sm text-[#11538d] font-bold focus:outline-none focus:ring-1 focus:ring-violet-700 cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
+                        className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[6rem] px-4 h-[42px] text-sm text-[var(--color-accent-teal)] font-bold focus:outline-none focus:ring-1 focus:ring-violet-700 cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
                       >
                         <option value="All" className="bg-slate-900 text-white">Todos</option>
                         {years.map(y => <option key={String(y)} value={String(y)} className="bg-slate-900 text-white">{y}</option>)}
