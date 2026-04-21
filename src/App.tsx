@@ -182,14 +182,15 @@ export default function App() {
     perfYTD: number | string
   }>>({});
   const [isFetchingSwing, setIsFetchingSwing] = useState(false);
+  const [hasAttemptedSwingFetch, setHasAttemptedSwingFetch] = useState(false);
   
   // Filter States
   const currentYear = new Date().getFullYear().toString();
   const currentMonth = (new Date().getMonth() + 1).toString().padStart(2, '0');
   
   const [filterTicker, setFilterTicker] = useState<string>("All");
-  const [filterYear, setFilterYear] = useState<string>(currentYear);
-  const [filterMonth, setFilterMonth] = useState<string>(currentMonth);
+  const [filterYear, setFilterYear] = useState<string>("2026");
+  const [filterMonth, setFilterMonth] = useState<string>("All");
   const [filterTipoAtividade, setFilterTipoAtividade] = useState<string>("All");
   const [pieViewMode, setPieViewMode] = useState<'Ticker' | 'Tipo Atividade' | 'Banco/Corretora'>('Ticker');
   const [selectedYieldYear, setSelectedYieldYear] = useState<string>("2026");
@@ -1049,10 +1050,11 @@ export default function App() {
 
   // Auto-fetch Swing Trade Data when tab is selected
   useEffect(() => {
-    if (activeTab === 'swing-trade' && tickers.length > 0 && Object.keys(swingTradeData).length === 0 && !isFetchingSwing) {
+    if (activeTab === 'swing-trade' && tickers.length > 0 && !hasAttemptedSwingFetch && !isFetchingSwing) {
+      setHasAttemptedSwingFetch(true);
       fetchSwingTradeBatch(tickers);
     }
-  }, [activeTab, tickers, swingTradeData, isFetchingSwing]);
+  }, [activeTab, tickers, hasAttemptedSwingFetch, isFetchingSwing]);
 
   const atividades = useMemo(() => {
     if (!allData) return [];
@@ -1252,10 +1254,20 @@ export default function App() {
 
     const grouped = new Map<string, Record<string, number>>();
     const foundTypes = new Set<string>();
+    const latestB3Total = new Map<string, number>();
 
     allData.forEach(row => {
       const ticker = row["Ticker"];
       if (!ticker || ticker.toUpperCase() === "MONTH CLOSING" || ticker.toUpperCase() === "TOTAL") return;
+
+      // Keep tracking latest B3 Total per ticker
+      const b3TotalStr = row["B3 Preço total"];
+      if (b3TotalStr && b3TotalStr !== "NOT FOUND") {
+         const val = parseMoney(String(b3TotalStr));
+         if (val > 0) {
+           latestB3Total.set(ticker, val); 
+         }
+      }
 
       const parts = row["Data"] ? row["Data"].split('/') : [];
       const y = parts.length === 3 ? parts[2] : "";
@@ -1287,9 +1299,15 @@ export default function App() {
     const data = Array.from(grouped.entries()).map(([ticker, values]) => {
       let total = 0;
       Object.values(values).forEach(v => total += v);
+      
+      const b3Total = latestB3Total.get(ticker) || 0;
+      const percentage = b3Total > 0 ? (total / b3Total) * 100 : 0;
+
       return {
         ticker,
         total,
+        b3Total,
+        percentage,
         ...values
       };
     }).filter(item => item.total > 0).sort((a,b) => b.total - a.total);
@@ -2005,10 +2023,9 @@ export default function App() {
                 <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
                   <h3 className="font-semibold text-lg flex items-center gap-2">
                     <Coins className="w-5 h-5 text-emerald-400" />
-                    Yields (Rendimentos/Dividendos)
+                    Yields
                   </h3>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-300 uppercase">Filtro de Ano:</span>
                     <select 
                       value={selectedYieldYear}
                       onChange={(e) => setSelectedYieldYear(e.target.value)}
@@ -2047,23 +2064,32 @@ export default function App() {
                             color: '#fff'
                           }}
                           itemStyle={{ fontSize: '12px' }}
-                          formatter={(value: number, name: string) => [`R$ ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}`, name]}
+                          formatter={(value: number, name: string, props: any) => {
+                            // If it's building the tooltip for the total/stacked item, also show percentage
+                            const b3Total = props.payload.b3Total;
+                            const perc = props.payload.percentage;
+                            let percStr = "";
+                            if (perc > 0) {
+                              percStr = ` (${perc.toFixed(2)}% do Patrimônio)`;
+                            }
+                            return [`R$ ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}${percStr}`, name];
+                          }}
                         />
                         <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                        {computedYieldChartData.types.map(type => (
+                        {computedYieldChartData.types.map((type, idx) => (
                           <Bar 
                             key={type} 
                             dataKey={type} 
                             stackId="a" 
                             fill={YIELD_COLORS[type] || '#8884d8'} 
-                            radius={computedYieldChartData.types.length === 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                            radius={computedYieldChartData.types.length === 1 || idx === computedYieldChartData.types.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
                           />
                         ))}
                       </BarChart>
                     </ResponsiveContainer>
                   ) : (
                     <div className="flex items-center justify-center h-full text-slate-500 italic">
-                      Nenhum registro de rendimento/dividendo neste período.
+                      Nenhum registro de rendimento neste período.
                     </div>
                   )}
                 </div>
