@@ -78,8 +78,8 @@ body {
 
 @media (max-width: 640px) {
   .bg-blobs {
-    background-size: 130% auto !important; /* Tamanho ligeiramente reduzido para caber melhor no mobile */
-    background-position: center 10% !important; /* Ajuste para exibir a parte superior da imagem */
-    background-attachment: scroll;
+    background-size: cover !important; /* Retorna para cover para preencher toda a tela (topo até o chão) */
+    background-position: center !important; /* Centraliza perfeitamente nos celulares */
+    background-attachment: fixed !important;
   }
 }
