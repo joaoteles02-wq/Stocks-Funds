@@ -4,7 +4,9 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { google } from "googleapis";
 import dotenv from "dotenv";
-import yahooFinance from 'yahoo-finance2';
+import YahooFinance from "yahoo-finance2";
+
+const yahooFinance = new YahooFinance();
 
 dotenv.config();
 

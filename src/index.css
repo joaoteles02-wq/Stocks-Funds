@@ -68,8 +68,8 @@ body {
   height: 100vh;
   z-index: -1;
   background-image: 
-    linear-gradient(to bottom, rgba(10, 15, 30, 0.4), rgba(10, 15, 30, 0.6)),
-    url('/Image chart-07.jpg');
+    linear-gradient(to bottom, rgba(10, 15, 30, 0.3), rgba(10, 15, 30, 0.5)),
+    url('/bg-app.png');
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
