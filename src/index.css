@@ -78,8 +78,8 @@ body {
 
 @media (max-width: 640px) {
   .bg-blobs {
-    background-size: 400% auto !important; /* Aumenta drasticamente a escala no celular */
-    background-position: center top !important;
-    background-attachment: scroll; /* Melhora performance em alguns mobiles */
+    background-size: 180% auto !important; /* Ajuste moderado apenas para celular */
+    background-position: center 20% !important; /* Foca na parte superior-central */
+    background-attachment: scroll;
   }
 }

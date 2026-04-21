@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { google } from "googleapis";
 import dotenv from "dotenv";
+import yahooFinance from 'yahoo-finance2';
 
 dotenv.config();
 
@@ -15,6 +16,47 @@ const PORT = 3000;
 
 app.set("trust proxy", true);
 app.use(express.json());
+
+// API para buscar cotações via yahoo-finance2
+app.post("/api/finance/quote", async (req, res) => {
+  const { tickers } = req.body;
+  if (!tickers || !Array.isArray(tickers)) {
+    return res.status(400).json({ error: "Tickers not provided" });
+  }
+
+  try {
+    const results: Record<string, any> = {};
+    const formattedTickers = tickers.map(t => {
+      const clean = t.trim().toUpperCase();
+      // Adiciona .SA aos ativos da B3
+      if (/^[A-Z]{4}[0-9]{1,2}$/.test(clean)) {
+        return `${clean}.SA`;
+      }
+      return clean;
+    });
+
+    const quotes = await yahooFinance.quote(formattedTickers);
+    
+    // Suporte tanto array quanto um único resultado
+    const quotesArray: any[] = Array.isArray(quotes) ? quotes : [quotes];
+    
+    quotesArray.forEach(q => {
+      if (q && q.symbol) {
+        // Remove .SA do retorno para casar com os dados
+        const originalSymbol = q.symbol.replace('.SA', '');
+        results[originalSymbol] = {
+          price: q.regularMarketPrice,
+          currency: q.currency
+        };
+      }
+    });
+
+    res.json({ quotes: results });
+  } catch (error) {
+    console.error("Error fetching quotes:", error);
+    res.status(500).json({ error: "Failed to fetch quotes" });
+  }
+});
 
 // Google OAuth Setup
 const oauth2Client = new google.auth.OAuth2(

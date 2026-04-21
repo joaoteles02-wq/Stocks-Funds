@@ -39,7 +39,8 @@ import {
   Cell,
   BarChart,
   Bar,
-  YAxis
+  YAxis,
+  Legend
 } from 'recharts';
 import Papa from 'papaparse';
 import { auth, db, googleProvider } from './lib/firebase';
@@ -191,6 +192,7 @@ export default function App() {
   const [filterMonth, setFilterMonth] = useState<string>(currentMonth);
   const [filterTipoAtividade, setFilterTipoAtividade] = useState<string>("All");
   const [pieViewMode, setPieViewMode] = useState<'Ticker' | 'Tipo Atividade' | 'Banco/Corretora'>('Ticker');
+  const [selectedYieldYear, setSelectedYieldYear] = useState<string>("2026");
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -259,89 +261,33 @@ export default function App() {
   const fetchSwingTradeBatch = async (tickersToFetch: string[]) => {
     if (tickersToFetch.length === 0) return;
     setIsFetchingSwing(true);
+    console.log("Fetching Current Price for Swing Data from local API:", tickersToFetch);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      // Use standard B3 suffix for better search results if they look like B3 tickers
-      const formattedTickers = tickersToFetch.map(t => {
-        const clean = t.trim().toUpperCase();
-        // Brazilian B3 tickers are usually 4 or 5 chars starting with letters and ending with numbers
-        if (/^[A-Z]{4}[0-9]{1,2}$/.test(clean)) {
-          return `${clean}.SA`;
-        }
-        return clean;
+      const response = await fetch('/api/finance/quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tickers: tickersToFetch })
       });
 
-      const prompt = `Como um analista financeiro Sênior, eu preciso das cotações de fechamento (ou preço atual se for hoje 20/04/2026) para os seguintes tickers: ${formattedTickers.join(', ')}.
-      
-      IMPORTANTE:
-      - Tickers terminando em .SA são da Bovespa (Brasil) e os preços DEVEM ser em REAIS (BRL). Pesquise por "cotação [ticker] b3" ou "fechamento [ticker] [data]".
-      - Tickers americanos (sem .SA) são em DÓLARES (USD).
-      
-      Datas requeridas para CADA ativo:
-      1. HOJE: 20/04/2026
-      2. 7 dias atrás: 13/04/2026
-      3. 31 dias atrás: 20/03/2026
-      4. 365 dias atrás: 20/04/2025
-      5. Início de 2026: 02/01/2026
-      
-      Retorne um JSON rigoroso onde as chaves são os nomes originais (sem .SA): ${tickersToFetch.join(', ')}.
-      Exemplo de busca sugerida para a ferramenta: "VALE3.SA historical price April 20 2026".
-      
-      Se não houver dados para uma data, retorne 0.0 para esse campo específico.`;
+      if (!response.ok) {
+        throw new Error('Failed to fetch from API');
+      }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} } as any],
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            additionalProperties: {
-              type: Type.OBJECT,
-              properties: {
-                current: { type: Type.NUMBER },
-                hist7d: { type: Type.NUMBER },
-                hist31d: { type: Type.NUMBER },
-                hist365d: { type: Type.NUMBER },
-                histYTD: { type: Type.NUMBER }
-              },
-              required: ["current", "hist7d", "hist31d", "hist365d", "histYTD"]
-            }
-          }
-        }
-      });
-
-      const rawText = response.text || "{}";
-      const raw = JSON.parse(rawText);
+      const raw = await response.json();
       const updatedData = { ...swingTradeData };
-      
-      // Normalize raw keys for better matching
-      const normalizedRaw: Record<string, any> = {};
-      Object.keys(raw).forEach(key => {
-        const normKey = key.trim().toUpperCase().replace(/\.SA$/, '');
-        normalizedRaw[normKey] = raw[key];
-      });
+      const normalizedRaw = raw.quotes || {};
 
       tickersToFetch.forEach(t => {
         const cleanT = t.trim().toUpperCase();
-        const data = normalizedRaw[cleanT];
+        const quoteInfo = normalizedRaw[cleanT];
         
-        if (data && typeof data.current === 'number' && data.current > 0) {
-          const cur = data.current;
-          const calcPerf = (old: any) => {
-            if (typeof cur === 'number' && cur > 0 && typeof old === 'number' && old > 0) {
-              return (cur / old) - 1;
-            }
-            return "NOT FOUND";
-          };
-
+        if (quoteInfo && typeof quoteInfo.price === 'number' && quoteInfo.price > 0) {
           updatedData[t] = { 
-            currentPrice: cur,
-            perfWeek: calcPerf(data.hist7d),
-            perfMonth: calcPerf(data.hist31d),
-            perfYear: calcPerf(data.hist365d),
-            perfYTD: calcPerf(data.histYTD)
+            currentPrice: quoteInfo.price,
+            perfWeek: "-",
+            perfMonth: "-",
+            perfYear: "-",
+            perfYTD: "-"
           };
         } else {
           updatedData[t] = {
@@ -1301,6 +1247,67 @@ export default function App() {
     return `R$ ${sumYields.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }, [allData, filterTicker, filterYear, filterMonth]);
 
+  const computedYieldChartData = useMemo(() => {
+    if (!allData) return { data: [], types: [] };
+
+    const grouped = new Map<string, Record<string, number>>();
+    const foundTypes = new Set<string>();
+
+    allData.forEach(row => {
+      const ticker = row["Ticker"];
+      if (!ticker || ticker.toUpperCase() === "MONTH CLOSING" || ticker.toUpperCase() === "TOTAL") return;
+
+      const parts = row["Data"] ? row["Data"].split('/') : [];
+      const y = parts.length === 3 ? parts[2] : "";
+
+      if (y === selectedYieldYear || selectedYieldYear === "All") {
+        const transacaoSource = String(row["Transação"] || "").trim();
+        const tUpper = transacaoSource.toUpperCase();
+        
+        let matchedYieldType = "";
+        if (tUpper === "DIVIDENDOS" || tUpper === "DIVIDENDO") matchedYieldType = "Dividendos";
+        else if (tUpper.includes("JUROS S/ CAPITAL PRÓPRIO") || tUpper.includes("JCP")) matchedYieldType = "Juros s/ capital próprio";
+        else if (tUpper.includes("CLIENTE")) matchedYieldType = "Juros s/ capital cliente";
+        else if (tUpper.includes("FRAÇÃO") || tUpper.includes("FRACOES")) matchedYieldType = "Frações de ações";
+        else if (tUpper === "RENDIMENTOS" || tUpper === "RENDIMENTO") matchedYieldType = "Rendimentos";
+
+        if (matchedYieldType) {
+          const val = parseMoney(String(row["Yields"] || "0"));
+          if (val !== 0) {
+            foundTypes.add(matchedYieldType);
+            if (!grouped.has(ticker)) {
+              grouped.set(ticker, {});
+            }
+            grouped.get(ticker)![matchedYieldType] = (grouped.get(ticker)![matchedYieldType] || 0) + val;
+          }
+        }
+      }
+    });
+
+    const data = Array.from(grouped.entries()).map(([ticker, values]) => {
+      let total = 0;
+      Object.values(values).forEach(v => total += v);
+      return {
+        ticker,
+        total,
+        ...values
+      };
+    }).filter(item => item.total > 0).sort((a,b) => b.total - a.total);
+
+    return {
+      data,
+      types: Array.from(foundTypes)
+    };
+  }, [allData, selectedYieldYear]);
+
+  const YIELD_COLORS: Record<string, string> = {
+    'Dividendos': '#3B82F6',
+    'Juros s/ capital próprio': '#F59E0B',
+    'Juros s/ capital cliente': '#A855F7',
+    'Frações de ações': '#10B981',
+    'Rendimentos': '#EC4899'
+  };
+
   const computedAllocationData = useMemo(() => {
     if (!allData) return [];
     const targetYM = (filterYear === "All" || filterMonth === "All") ? "999999" : filterYear + filterMonth;
@@ -1990,7 +1997,78 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+
               </div>
+
+              {/* Yields Bar Chart (New) */}
+              <div className="glass-panel p-4 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-4 min-h-[400px] mt-2">
+                <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
+                  <h3 className="font-semibold text-lg flex items-center gap-2">
+                    <Coins className="w-5 h-5 text-emerald-400" />
+                    Yields (Rendimentos/Dividendos)
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-300 uppercase">Filtro de Ano:</span>
+                    <select 
+                      value={selectedYieldYear}
+                      onChange={(e) => setSelectedYieldYear(e.target.value)}
+                      className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl px-3 py-1.5 text-sm text-emerald-400 font-bold focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer outline-none"
+                    >
+                      <option value="All" className="bg-slate-900 text-white">Todos os Anos</option>
+                      {years.map(y => <option key={String(y)} value={String(y)} className="bg-slate-900 text-white">{y}</option>)}
+                    </select>
+                  </div>
+                </div>
+                
+                <div className="flex-1 w-full min-h-[300px]">
+                  {computedYieldChartData.data.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={computedYieldChartData.data} margin={{ top: 20, right: 30, left: 20, bottom: 50 }}>
+                        <XAxis 
+                          dataKey="ticker" 
+                          stroke="rgba(255,255,255,0.5)" 
+                          tick={{fill: 'rgba(255,255,255,0.7)', fontSize: 12}}
+                          angle={-45}
+                          textAnchor="end"
+                          height={60}
+                          interval={0}
+                        />
+                        <YAxis 
+                          stroke="rgba(255,255,255,0.2)" 
+                          tick={{fill: 'rgba(255,255,255,0.5)', fontSize: 12}}
+                          tickFormatter={(val) => `R$ ${val}`}
+                        />
+                        <Tooltip
+                          contentStyle={{ 
+                            backgroundColor: 'rgba(13, 27, 42, 0.9)', 
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '16px',
+                            backdropFilter: 'blur(12px)',
+                            color: '#fff'
+                          }}
+                          itemStyle={{ fontSize: '12px' }}
+                          formatter={(value: number, name: string) => [`R$ ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}`, name]}
+                        />
+                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
+                        {computedYieldChartData.types.map(type => (
+                          <Bar 
+                            key={type} 
+                            dataKey={type} 
+                            stackId="a" 
+                            fill={YIELD_COLORS[type] || '#8884d8'} 
+                            radius={computedYieldChartData.types.length === 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                          />
+                        ))}
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-slate-500 italic">
+                      Nenhum registro de rendimento/dividendo neste período.
+                    </div>
+                  )}
+                </div>
+              </div>
+
             </motion.div>
           ) : activeTab === 'historico' ? (
             <motion.div 
