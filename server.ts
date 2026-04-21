@@ -28,28 +28,46 @@ app.post("/api/finance/quote", async (req, res) => {
     const results: Record<string, any> = {};
     const formattedTickers = tickers.map(t => {
       const clean = t.trim().toUpperCase();
-      // Adiciona .SA aos ativos da B3
       if (/^[A-Z]{4}[0-9]{1,2}$/.test(clean)) {
         return `${clean}.SA`;
       }
       return clean;
     });
 
-    const quotes = await yahooFinance.quote(formattedTickers);
+    let quotesObj: any = [];
+    try {
+      quotesObj = await yahooFinance.quote(formattedTickers, { returnEmptyArray: true, validateResult: false } as any);
+    } catch (err) {
+      console.log("Bulk quote failed:", err);
+    }
     
-    // Suporte tanto array quanto um único resultado
-    const quotesArray: any[] = Array.isArray(quotes) ? quotes : [quotes];
+    const quotesArray: any[] = Array.isArray(quotesObj) ? quotesObj : [quotesObj];
     
-    quotesArray.forEach(q => {
-      if (q && q.symbol) {
-        // Remove .SA do retorno para casar com os dados
-        const originalSymbol = q.symbol.replace('.SA', '');
-        results[originalSymbol] = {
-          price: q.regularMarketPrice,
-          currency: q.currency
-        };
-      }
-    });
+    // If bulk fetch failed (it sometimes fails if 1 ticker is invalid), fallback to individual fetches
+    if (quotesArray.length === 0 || !quotesArray[0]) {
+      console.log("Bulk fetch failed, falling back to individual fetches");
+      const promises = formattedTickers.map(async (t) => {
+        try {
+          return await yahooFinance.quote(t);
+        } catch {
+          return null;
+        }
+      });
+      const indRes = await Promise.all(promises);
+      indRes.forEach(q => {
+        if (q && q.symbol) {
+          const originalSymbol = q.symbol.replace('.SA', '');
+          results[originalSymbol] = { price: q.regularMarketPrice || q.price, currency: q.currency };
+        }
+      });
+    } else {
+      quotesArray.forEach(q => {
+        if (q && q.symbol) {
+          const originalSymbol = q.symbol.replace('.SA', '');
+          results[originalSymbol] = { price: q.regularMarketPrice || q.price, currency: q.currency };
+        }
+      });
+    }
 
     res.json({ quotes: results });
   } catch (error) {

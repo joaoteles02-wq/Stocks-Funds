@@ -37,10 +37,12 @@ import {
   PieChart,
   Pie,
   Cell,
-  BarChart,
+  ComposedChart,
   Bar,
+  Line,
   YAxis,
-  Legend
+  Legend,
+  LabelList
 } from 'recharts';
 import Papa from 'papaparse';
 import { auth, db, googleProvider } from './lib/firebase';
@@ -136,6 +138,23 @@ const normalizeHeader = (header: string) => {
   if (norm.includes('overall month')) return 'OverAll Month';
   
   return header.trim();
+};
+
+const parseMoney = (val: any) => {
+  if (!val) return 0;
+  const str = String(val).replace("R$", "").replace(/\./g, "").replace(",", ".").trim();
+  const num = parseFloat(str);
+  return isNaN(num) ? 0 : num;
+};
+
+const normalizeYear = (y: any) => {
+  if (!y) return "";
+  let raw = String(y).trim();
+  // Se conter espaço (ex "2026 10:45:00"), pegar apenas a data
+  if (raw.includes(' ')) {
+    raw = raw.split(' ')[0];
+  }
+  return raw.length === 2 ? `20${raw}` : raw;
 };
 
 export default function App() {
@@ -252,7 +271,9 @@ export default function App() {
         }
       });
 
-      return JSON.parse(response.text || "{}");
+      const text = response.text || "{}";
+      const cleanJson = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+      return JSON.parse(cleanJson);
     } catch (e) {
       console.error("Gemini fetch failed", e);
       return null;
@@ -262,7 +283,7 @@ export default function App() {
   const fetchSwingTradeBatch = async (tickersToFetch: string[]) => {
     if (tickersToFetch.length === 0) return;
     setIsFetchingSwing(true);
-    console.log("Fetching Current Price for Swing Data from local API:", tickersToFetch);
+    console.log("Fetching Swing Data from Local API:", tickersToFetch);
     try {
       const response = await fetch('/api/finance/quote', {
         method: 'POST',
@@ -281,7 +302,6 @@ export default function App() {
       tickersToFetch.forEach(t => {
         const cleanT = t.trim().toUpperCase();
         const quoteInfo = normalizedRaw[cleanT];
-        
         if (quoteInfo && typeof quoteInfo.price === 'number' && quoteInfo.price > 0) {
           updatedData[t] = { 
             currentPrice: quoteInfo.price,
@@ -300,7 +320,6 @@ export default function App() {
           };
         }
       });
-      
       setSwingTradeData(updatedData);
     } catch (e) {
       console.error("Swing fetch failed", e);
@@ -1134,19 +1153,12 @@ export default function App() {
         }
       }
       
-      const matchYear = filterYear === "All" || year === filterYear;
+      const matchYear = filterYear === "All" || normalizeYear(year) === filterYear;
       const matchMonth = filterMonth === "All" || month === filterMonth;
       const matchTicker = filterTicker === "All" || row["Ticker"] === filterTicker;
       return matchYear && matchMonth && matchTicker;
     });
   }, [allData, filterTicker, filterYear, filterMonth]);
-
-  const parseMoney = (val: any) => {
-    if (!val) return 0;
-    const str = String(val).replace("R$", "").replace(/\./g, "").replace(",", ".").trim();
-    const num = parseFloat(str);
-    return isNaN(num) ? 0 : num;
-  };
 
   const getPatrimonioFor = (t: string, y: string, m: string, tp: string = "All", c: string = "All") => {
     if (!allData) return 0;
@@ -1173,11 +1185,20 @@ export default function App() {
       const matchCorretora = c === "All" || corr === c;
       if (!matchCorretora) return;
 
-      const parts = row["Data"] ? row["Data"].split('/') : [];
-      if (parts.length !== 3) return;
-      const rowYM = parts[2] + parts[1].padStart(2, '0');
+      const dStr = String(row["Data"] || "").trim();
+      let rowYM = "";
+      if (dStr.includes('/')) {
+        const parts = dStr.split('/');
+        if (parts.length === 3) rowYM = normalizeYear(parts[2]) + parts[1].padStart(2, '0');
+      } else if (dStr.includes('-')) {
+        const parts = dStr.split('-');
+        if (parts.length === 3) {
+          const yearPart = parts[0].length === 4 ? parts[0] : parts[2];
+          rowYM = normalizeYear(yearPart) + parts[1].padStart(2, '0');
+        }
+      }
       
-      if (rowYM <= targetYM) {
+      if (rowYM && rowYM <= targetYM) {
         // Usamos Saldo Custo como fallback se B3 total não estiver disponível
         const b3TotalStr = row["B3 Preço total"];
         const saldoCustoStr = row["Saldo Custo"];
@@ -1238,7 +1259,7 @@ export default function App() {
       const m = parts.length === 3 ? parts[1] : "";
       const y = parts.length === 3 ? parts[2] : "";
       
-      const matchYear = filterYear === "All" || y === filterYear;
+      const matchYear = filterYear === "All" || normalizeYear(y) === filterYear;
       const matchMonth = filterMonth === "All" || m === filterMonth;
       const matchTicker = filterTicker === "All" || ticker === filterTicker;
       
@@ -1269,10 +1290,20 @@ export default function App() {
          }
       }
 
-      const parts = row["Data"] ? row["Data"].split('/') : [];
-      const y = parts.length === 3 ? parts[2] : "";
+      const dStr = String(row["Data"] || "").trim();
+      let y = "";
+      if (dStr.includes('/')) {
+        const parts = dStr.split('/');
+        y = parts.length === 3 ? parts[2] : "";
+      } else if (dStr.includes('-')) {
+        const parts = dStr.split('-');
+        if (parts.length === 3) {
+          y = parts[0].length === 4 ? parts[0] : parts[2];
+        }
+      }
+      const normY = normalizeYear(y);
 
-      if (y === selectedYieldYear || selectedYieldYear === "All") {
+      if (normY === selectedYieldYear || selectedYieldYear === "All") {
         const transacaoSource = String(row["Transação"] || "").trim();
         const tUpper = transacaoSource.toUpperCase();
         
@@ -1337,11 +1368,20 @@ export default function App() {
       const ticker = row["Ticker"];
       if (!ticker || ticker.toUpperCase() === "MONTH CLOSING" || ticker.toUpperCase() === "TOTAL") return;
       
-      const parts = row["Data"] ? row["Data"].split('/') : [];
-      if (parts.length !== 3) return;
-      const rowYM = parts[2] + parts[1];
+      const dStr = String(row["Data"] || "").trim();
+      let rowYM = "";
+      if (dStr.includes('/')) {
+        const parts = dStr.split('/');
+        if (parts.length === 3) rowYM = normalizeYear(parts[2]) + parts[1].padStart(2, '0');
+      } else if (dStr.includes('-')) {
+        const parts = dStr.split('-');
+        if (parts.length === 3) {
+          const y = parts[0].length === 4 ? parts[0] : parts[2];
+          rowYM = normalizeYear(y) + parts[1].padStart(2, '0');
+        }
+      }
       
-      if (rowYM <= targetYM) {
+      if (rowYM && rowYM <= targetYM) {
         const b3TotalStr = row["B3 Preço total"];
         if (b3TotalStr && b3TotalStr !== "NOT FOUND") {
           latestTickerInfo.set(ticker, {
@@ -2040,7 +2080,7 @@ export default function App() {
                 <div className="flex-1 w-full min-h-[300px]">
                   {computedYieldChartData.data.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={computedYieldChartData.data} margin={{ top: 20, right: 30, left: 20, bottom: 50 }}>
+                      <ComposedChart data={computedYieldChartData.data} margin={{ top: 30, right: 30, left: 20, bottom: 50 }}>
                         <XAxis 
                           dataKey="ticker" 
                           stroke="rgba(255,255,255,0.5)" 
@@ -2050,11 +2090,7 @@ export default function App() {
                           height={60}
                           interval={0}
                         />
-                        <YAxis 
-                          stroke="rgba(255,255,255,0.2)" 
-                          tick={{fill: 'rgba(255,255,255,0.5)', fontSize: 12}}
-                          tickFormatter={(val) => `R$ ${val}`}
-                        />
+                        <YAxis hide />
                         <Tooltip
                           contentStyle={{ 
                             backgroundColor: 'rgba(13, 27, 42, 0.9)', 
@@ -2065,27 +2101,46 @@ export default function App() {
                           }}
                           itemStyle={{ fontSize: '12px' }}
                           formatter={(value: number, name: string, props: any) => {
-                            // If it's building the tooltip for the total/stacked item, also show percentage
+                            if (name === "total" || name === "percentage" || name === "b3Total") return [];
+                            
                             const b3Total = props.payload.b3Total;
-                            const perc = props.payload.percentage;
                             let percStr = "";
-                            if (perc > 0) {
-                              percStr = ` (${perc.toFixed(2)}% do Patrimônio)`;
+                            if (b3Total > 0 && value > 0) {
+                              const partialPerc = (value / b3Total) * 100;
+                              percStr = ` (${partialPerc.toFixed(2)}%)`;
                             }
                             return [`R$ ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}${percStr}`, name];
                           }}
                         />
                         <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                        {computedYieldChartData.types.map((type, idx) => (
-                          <Bar 
-                            key={type} 
-                            dataKey={type} 
-                            stackId="a" 
-                            fill={YIELD_COLORS[type] || '#8884d8'} 
-                            radius={computedYieldChartData.types.length === 1 || idx === computedYieldChartData.types.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                        {computedYieldChartData.types.map((type, idx) => {
+                          const isLast = computedYieldChartData.types.length === 1 || idx === computedYieldChartData.types.length - 1;
+                          return (
+                            <Bar 
+                              key={type} 
+                              dataKey={type} 
+                              stackId="a" 
+                              fill={YIELD_COLORS[type] || '#8884d8'} 
+                              radius={isLast ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                            />
+                          );
+                        })}
+                        <Line 
+                          type="monotone" 
+                          dataKey="total" 
+                          stroke="transparent" 
+                          dot={{ r: 0, fill: 'transparent', stroke: 'transparent' }} 
+                          activeDot={false}
+                        >
+                          <LabelList 
+                            dataKey="percentage" 
+                            position="top" 
+                            fill="#fff" 
+                            fontSize={11}
+                            formatter={(val: number) => val > 0 ? `${val.toFixed(2)}%` : ""} 
                           />
-                        ))}
-                      </BarChart>
+                        </Line>
+                      </ComposedChart>
                     </ResponsiveContainer>
                   ) : (
                     <div className="flex items-center justify-center h-full text-slate-500 italic">
