@@ -1469,7 +1469,7 @@ export default function App() {
         className="bg-blobs"
         style={useImageChart07 ? {
            backgroundImage: `linear-gradient(to bottom, rgba(10, 15, 30, 0.1), rgba(10, 15, 30, 0.3)), url('/Image chart-07.jpg')`,
-           backgroundSize: `cover`,
+           backgroundSize: `100% 100%`,
            backgroundRepeat: `no-repeat`,
            backgroundPosition: `center`,
            filter: `brightness(1.15)`

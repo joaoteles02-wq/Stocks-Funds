@@ -78,8 +78,8 @@ body {
 
 @media (max-width: 640px) {
   .bg-blobs {
-    background-size: cover !important; /* Retorna para cover para preencher toda a tela (topo até o chão) */
-    background-position: center !important; /* Centraliza perfeitamente nos celulares */
+    background-size: 100% 100% !important; /* Força o encaixe exato em largura e altura sem dar zoom */
+    background-position: center !important;
     background-attachment: fixed !important;
   }
 }
