@@ -25,6 +25,7 @@ import {
   Table,
   RefreshCw,
   Trash2,
+  FileSearch,
   AlertCircle,
   HelpCircle
 } from 'lucide-react';
@@ -102,27 +103,16 @@ const normalizeHeader = (header: string) => {
   const norm = header.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().replace(/\s+/g, ' ').toLowerCase();
   
   if (norm.includes('dollar') || norm.includes('dolar') || norm.includes('dólar')) return 'Dollar';
-  
-  if (norm === 'date' || norm === 'data' || norm.startsWith('data') || norm.includes('negôcio') || norm.includes('negócio') || norm.includes('negocio') || norm.includes('pregao') || norm.includes('pregão') || norm === 'dia' || norm.includes('liquidação') || norm.includes('liquidacao')) return 'Data';
-  
-  if (norm === 'ticker' || norm === 'ativo' || norm === 'papel' || norm.includes('código') || norm.includes('codigo') || norm.includes('instrumento') || norm.includes('produto') || norm.includes('símbolo') || norm.includes('simbolo') || norm.includes('ação') || norm.includes('acao')) return 'Ticker';
-  
-  if (norm.includes('transation') || norm.includes('transaction') || norm.includes('transação') || norm.includes('transacao') || norm.includes('operação') || norm.includes('operacao') || norm.includes('movimentação') || norm.includes('tipo de ordem') || norm === 'tipo' || norm === 'movimentacao') return 'Transação';
-  
-  if (norm.includes('stock proceeds') || norm.includes('yields') || norm.includes('rendimentos') || norm.includes('proventos') || norm.includes('dividendos') || norm.includes('juros') || norm.includes('jcp') || norm === 'valor bruto' || norm === 'rendimento') return 'Yields';
-  
+  if (norm === 'date' || norm === 'data' || norm.startsWith('data') || norm.includes('negôcio') || norm.includes('negócio') || norm.includes('negocio') || norm.includes('pregao') || norm.includes('pregão') || norm === 'dia' || norm.includes('liquidação') || norm.includes('liquidacao') || norm.includes('movimentação')) return 'Data';
+  if (norm === 'ticker' || norm === 'ativo' || norm === 'papel' || norm.includes('código') || norm.includes('codigo') || norm.includes('instrumento') || norm.includes('produto') || norm.includes('símbolo') || norm.includes('simbolo') || norm.includes('ação') || norm.includes('acao') || norm.includes('descrição') || norm.includes('descricao')) return 'Ticker';
+  if (norm.includes('transation') || norm.includes('transaction') || norm.includes('transação') || norm.includes('transacao') || norm.includes('operação') || norm.includes('operacao') || norm.includes('tipo de ordem') || norm === 'tipo' || norm === 'movimentacao') return 'Transação';
+  if (norm.includes('stock proceeds') || norm.includes('stockproceeds') || norm.includes('yields') || norm.includes('rendimentos') || norm.includes('proventos') || norm.includes('dividendos') || norm.includes('juros') || norm.includes('jcp') || norm === 'valor bruto' || norm === 'rendimento') return 'Yields';
   if (norm === 'units' || norm === 'un' || norm === 'unit' || norm.includes('quantidade') || norm.includes('qtd') || norm === 'volume' || norm === 'quantidade (un)') return 'UN';
-  
   if (norm.includes('balance units') || norm.includes('saldo de un') || norm.includes('saldo un') || norm.includes('quantidade acumulada') || norm.includes('saldo de un.')) return 'Saldo de Un';
-  
   if (norm.includes('b3') && (norm.includes('unit') || norm.includes('un'))) return 'B3 Preço Un';
-  
   if (norm.includes('b3') && (norm.includes('total') || norm.includes('val'))) return 'B3 Preço total';
-  
   if (norm.includes('cost unit') || norm.includes('preço un') || norm.includes('preco un') || norm.includes('valor unitário') || norm.includes('preco unitario') || norm.includes('preço unitário') || norm === 'preço' || norm === 'preco' || norm === 'custo un') return 'Preço Un de Custo';
-  
-  if ((norm.includes('total cost') || norm.includes('custo total')) && !norm.includes('balance') || norm.includes('valor total') || norm.includes('valor da operação') || norm.includes('valor liquido') || norm.includes('valor líquido')) return 'Total do Custo';
-  
+  if ((norm.includes('total cost') || norm.includes('custo total') || norm.includes('balance total cost')) && !norm.includes('saldo')) return 'Total do Custo';
   if (norm.includes('balance total cost') || norm.includes('saldo custo') || norm.includes('custo total acumulado') || norm.includes('saldo de custo')) return 'Saldo Custo';
   
   if (norm.includes('avarage price') || norm.includes('average price') || norm.includes('preço médio') || norm.includes('preco medio') || norm === 'pm' || norm === 'preço medio') return 'Preço Médio';
@@ -141,10 +131,33 @@ const normalizeHeader = (header: string) => {
 };
 
 const parseMoney = (val: any) => {
-  if (!val) return 0;
-  const str = String(val).replace("R$", "").replace(/\./g, "").replace(",", ".").trim();
+  if (val === undefined || val === null || val === "") return 0;
+  if (typeof val === 'number') return val;
+  
+  // Remove currency symbols and common spacing
+  let str = String(val).replace(/R\$\s?/gi, "").replace(/\$\s?/g, "").trim();
+  if (str === "" || str.toLowerCase() === "nan") return 0;
+
+  // Detect negative values (handles (1.234,56) or -1.234,56)
+  const isNegative = str.includes('(') || str.startsWith('-');
+  str = str.replace(/[()\-]/g, "").trim();
+
+  // Handle BR vs US decimals
+  // Logic: if there's both '.' and ',', the last one is the decimal separator
+  if (str.includes(',') && str.includes('.')) {
+    if (str.lastIndexOf(',') > str.lastIndexOf('.')) {
+      str = str.replace(/\./g, "").replace(",", ".");
+    } else {
+      str = str.replace(/,/g, "");
+    }
+  } else if (str.includes(',')) {
+    // Single separator found: assume comma is decimal (BR default)
+    str = str.replace(",", ".");
+  }
+  
   const num = parseFloat(str);
-  return isNaN(num) ? 0 : num;
+  const finalNum = isNaN(num) ? 0 : num;
+  return isNegative ? -finalNum : finalNum;
 };
 
 const normalizeYear = (y: any) => {
@@ -165,23 +178,10 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [memoryUsage, setMemoryUsage] = useState<string>("0.0 MB");
 
-  // 1. Initial Load (Synchronous as possible to prevent white flickering)
-  const [allData, setAllData] = useState<any[] | null>(() => {
-    const saved = typeof window !== 'undefined' ? localStorage.getItem('saved_csv_data') : null;
-    if (saved) {
-      try {
-        const results = Papa.parse(saved, {
-          header: true,
-          skipEmptyLines: true,
-          transformHeader: normalizeHeader,
-          transform: (value) => value.trim(),
-        });
-        return results.data;
-      } catch (e) { return null; }
-    }
-    return null;
-  });
+  // 1. Initial Load
+  const [allData, setAllData] = useState<any[] | null>(null);
 
   // Google Sheets Integration State
   const [spreadsheetId, setSpreadsheetId] = useState('');
@@ -208,11 +208,11 @@ export default function App() {
   const currentMonth = (new Date().getMonth() + 1).toString().padStart(2, '0');
   
   const [filterTicker, setFilterTicker] = useState<string>("All");
-  const [filterYear, setFilterYear] = useState<string>("2026");
-  const [filterMonth, setFilterMonth] = useState<string>("All");
+  const [filterYear, setFilterYear] = useState<string>(currentYear);
+  const [filterMonth, setFilterMonth] = useState<string>(currentMonth);
   const [filterTipoAtividade, setFilterTipoAtividade] = useState<string>("All");
   const [pieViewMode, setPieViewMode] = useState<'Ticker' | 'Tipo Atividade' | 'Banco/Corretora'>('Ticker');
-  const [selectedYieldYear, setSelectedYieldYear] = useState<string>("2026");
+  const [selectedYieldYear, setSelectedYieldYear] = useState<string>(currentYear);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -567,6 +567,16 @@ export default function App() {
     }
   }, [user]);
 
+  const checkMemoryUsage = () => {
+    try {
+      const savedCsv = localStorage.getItem('saved_csv_data') || "";
+      const size = (new Blob([savedCsv]).size / (1024 * 1024)).toFixed(2);
+      setMemoryUsage(`${size} MB`);
+    } catch (e) {
+      setMemoryUsage("Erro");
+    }
+  };
+
   const loadLocalCSV = () => {
     const savedCsv = localStorage.getItem('saved_csv_data');
     if (savedCsv) {
@@ -578,8 +588,39 @@ export default function App() {
         complete: (results) => {
           setTableColumns(results.meta.fields || []);
           processData(results.data as any[]);
+          checkMemoryUsage();
         },
       });
+    }
+  };
+
+  const handleLoadPublicFile = async () => {
+    setSyncing(true);
+    try {
+      // Nome exato do arquivo que o usuário disse ter enviado
+      const fileName = "/App_Stocks Sheets - Dividends_List .csv";
+      const response = await fetch(fileName);
+      if (!response.ok) throw new Error("Arquivo não encontrado na pasta pública.");
+      
+      const text = await response.text();
+      Papa.parse(text, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: normalizeHeader,
+        complete: (results) => {
+          if (results.data && results.data.length > 0) {
+            processData(results.data as any[]);
+            alert("Dados importados da pasta pública com sucesso!");
+            localStorage.setItem('saved_csv_data', text);
+            checkMemoryUsage();
+          }
+        }
+      });
+    } catch (e) {
+      console.error(e);
+      alert("Não foi possível carregar o arquivo da pasta pública. Verifique se o nome está correto: 'App_Stocks Sheets - Dividends_List .csv'");
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -740,6 +781,15 @@ export default function App() {
     }
   };
 
+  const handleResetData = () => {
+    if (window.confirm("Isso apagará TODOS os dados locais salvos no navegador. Os dados na nuvem (Firebase) não serão afetados. Deseja continuar?")) {
+      localStorage.removeItem('saved_csv_data');
+      setAllData(null);
+      setTableColumns([]);
+      window.location.reload();
+    }
+  };
+
   const handleSyncToCloud = async () => {
     if (!user || !allData || syncing) return;
     setSyncing(true);
@@ -799,35 +849,77 @@ export default function App() {
     }
   };
 
-  const handleExportCSV = () => {
-    if (!allData) return;
-    const csv = Papa.unparse(allData);
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", `investimentos_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const handleClearLocalCache = () => {
+    if (confirm("Isso apagará os dados temporários salvos no seu navegador. Seu arquivo original no PC continuará seguro. Deseja continuar?")) {
+      localStorage.removeItem('saved_csv_data');
+      setAllData(null);
+      alert("Memória limpa com sucesso!");
+      window.location.reload();
+    }
   };
 
-  useEffect(() => {
-    // Restaurando arquivo em memória caso o usuário atualize a página antes de mandar pra nuvem
-    const saved = localStorage.getItem('saved_csv_data');
-    if (saved) {
-      Papa.parse(saved, {
-        header: true,
-        skipEmptyLines: true,
-        transformHeader: normalizeHeader,
-        transform: (value) => value.trim(),
-        complete: (results) => {
-          setTableColumns(results.meta.fields || []);
-          processData(results.data as any[]);
-        },
+  const handleExportCSV = () => {
+    if (!allData || allData.length === 0) return;
+    
+    // Clean data for export: only include exactly the required columns in the correct order
+    const exportData = allData.map(row => {
+      const cleanRow: any = {};
+      REQUIRED_COLUMNS.forEach(col => {
+        cleanRow[col] = row[col] !== undefined ? row[col] : "";
       });
+      return cleanRow;
+    });
+
+    const csv = Papa.unparse(exportData, {
+      columns: REQUIRED_COLUMNS,
+      delimiter: ";"
+    });
+    const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.style.display = 'none';
+    link.href = url;
+    link.setAttribute("download", `investimentos_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    
+    // In an iframe without 'allow-downloads', link.click() fails silently.
+    // We try to trigger it, and if the user complains, it's mostly due to this iframe restriction.
+    setTimeout(() => {
+      try {
+        link.click();
+        document.body.removeChild(link);
+      } catch (err) {
+        console.error(err);
+      }
+      
+      // If we're inside an iframe (like AI Studio preview), warn the user
+      if (window.self !== window.top) {
+        alert("Aviso: O download de arquivos pode estar bloqueado dentro desta janela de visualização.\n\nPor favor, clique no ícone de abrir em 'Nova Guia' (canto superior direito) e tente baixar novamente lá!");
+      }
+    }, 100);
+  };
+
+  // Auto-save local data to localStorage so manual updates are preserved immediately
+  useEffect(() => {
+    if (allData && allData.length > 0) {
+      try {
+        const exportData = allData.map(row => {
+          const cleanRow: any = {};
+          REQUIRED_COLUMNS.forEach(col => {
+            cleanRow[col] = row[col] || "";
+          });
+          return cleanRow;
+        });
+        const csv = Papa.unparse(exportData, {
+          columns: REQUIRED_COLUMNS
+        });
+        localStorage.setItem('saved_csv_data', csv);
+        checkMemoryUsage();
+      } catch (err) {
+        console.error("Auto-save failed - likely iframe quota restricted", err);
+      }
     }
-  }, []);
+  }, [allData]);
 
   // Auto-preenchimento ao selecionar o Ticker
   useEffect(() => {
@@ -874,6 +966,7 @@ export default function App() {
         complete: (results) => {
           setTableColumns(results.meta.fields || []);
           processData(results.data as any[]);
+          if (fileInputRef.current) fileInputRef.current.value = "";
         },
       });
     };
@@ -959,7 +1052,12 @@ export default function App() {
         
         return newRow;
       })
-      .filter(r => r["Ticker"] !== "" && r["Ticker"] !== "TOTAL");
+      .filter(r => {
+        const t = String(r["Ticker"] || "").trim();
+        // Não removemos Ticker vazio imediatamente para permitir que o usuário veja
+        // Mas removemos linhas claramente de TOTAL ou vazias de objeto
+        return t !== "TOTAL" && r && typeof r === 'object';
+      });
 
     // 2. Desduplicação por Assinatura (Fingerprint)
     const uniqueMap = new Map<string, any>();
@@ -970,17 +1068,16 @@ export default function App() {
       
       // Para rendimentos, quantidade e preço muitas vezes vêm zerados de formas diferentes
       // na mesma corretora, o que quebra a desduplicação e soma duas vezes
-      const isYield = tipoAtiv.includes("RENDIMENTO") || tipoAtiv.includes("JURO") || tipoAtiv.includes("DIVIDEND") ||
-                      transacao.includes("RENDIMENTO") || transacao.includes("JURO") || transacao.includes("DIVIDEND") || transacao.includes("JCP");
+      const isYield = tipoAtiv.includes("RENDIMENTO") || tipoAtiv.includes("JURO") || tipoAtiv.includes("DIVIDEND") || tipoAtiv.includes("STOCK PROCEEDS") || tipoAtiv.includes("PROCEEDS") ||
+                      transacao.includes("RENDIMENTO") || transacao.includes("JURO") || transacao.includes("DIVIDEND") || transacao.includes("STOCK PROCEEDS") || transacao.includes("PROCEEDS") || transacao.includes("JCP");
                       
       if (isYield) {
-        // Reduzimos a assinatura para ignorar textos de transação que podem 
-        // diferir por 1 letra (causando o duplicado de 58.10)
         parts = [
           row["Data"],
           row["Ticker"],
           row["Banco/Corretora"],
-          row["_yields_fixed"]
+          row["_yields_fixed"],
+          row["UN"] // Adicionamos UN para diferenciar se houver dois rendimentos iguais no mesmo dia
         ];
       } else {
         parts = [
@@ -1006,15 +1103,31 @@ export default function App() {
 
     const dedupedData = Array.from(uniqueMap.values());
 
-    // 3. Ordenação Cronológica
+    // 3. Ordenação Cronológica (Robust parse for sorting)
     dedupedData.sort((a, b) => {
       const getComparable = (dateStr: string) => {
-        if (!dateStr || typeof dateStr !== 'string') return "00000000";
-        const p = dateStr.split('/');
-        if (p.length !== 3) return "00000000";
-        return p[2] + p[1] + p[0]; // YYYYMMDD
+        if (!dateStr || typeof dateStr !== 'string') return 0;
+        const s = dateStr.trim();
+        let d = 0, m = 0, y = 0;
+        
+        if (s.includes('/')) {
+          const p = s.split('/');
+          if (p.length === 3) {
+            d = parseInt(p[0]); m = parseInt(p[1]); y = parseInt(normalizeYear(p[2]));
+          }
+        } else if (s.includes('-')) {
+          const p = s.split('-');
+          if (p.length === 3) {
+            if (p[0].length === 4) { // YYYY-MM-DD
+              y = parseInt(p[0]); m = parseInt(p[1]); d = parseInt(p[2]);
+            } else { // DD-MM-YYYY
+              d = parseInt(p[0]); m = parseInt(p[1]); y = parseInt(normalizeYear(p[2]));
+            }
+          }
+        }
+        return (y * 10000) + (m * 100) + d;
       };
-      return getComparable(a["Data"]).localeCompare(getComparable(b["Data"]));
+      return getComparable(a["Data"]) - getComparable(b["Data"]);
     });
 
     // 4. Cálculos de Saldo e Preço Médio
@@ -1172,7 +1285,7 @@ export default function App() {
     // Important: allData must be sorted by date (already handled in processData)
     allData.forEach(row => {
       const ticker = row["Ticker"];
-      if (!ticker || ticker.toUpperCase() === "MONTH CLOSING") return;
+      if (!ticker || ticker.toUpperCase() === "MONTH CLOSING" || ticker.toUpperCase() === "TOTAL") return;
       
       const matchTicker = t === "All" || ticker === t;
       if (!matchTicker) return;
@@ -1199,13 +1312,15 @@ export default function App() {
       }
       
       if (rowYM && rowYM <= targetYM) {
-        // Usamos Saldo Custo como fallback se B3 total não estiver disponível
+        // Obter o valor de mercado (B3 Preço total) ou custo como último recurso
         const b3TotalStr = row["B3 Preço total"];
         const saldoCustoStr = row["Saldo Custo"];
         
         if (b3TotalStr && b3TotalStr.trim() !== "" && b3TotalStr !== "NOT FOUND") {
+          // Quando encontramos um preço de mercado, ele reflete o valor REAL do saldo naquele momento
           latestValues.set(ticker, parseMoney(b3TotalStr));
-        } else if (saldoCustoStr && saldoCustoStr.trim() !== "") {
+        } else if (saldoCustoStr && saldoCustoStr.trim() !== "" && !latestValues.has(ticker)) {
+          // Só usamos custo se ainda não tivermos nenhum valor registrado para esse ticker
           latestValues.set(ticker, parseMoney(saldoCustoStr));
         }
       }
@@ -1243,27 +1358,69 @@ export default function App() {
   }, [allData, filterTicker, filterYear, filterMonth]);
 
   const computedPatrimonio = useMemo(() => {
-    const sum = getPatrimonioFor(filterTicker, filterYear, filterMonth);
-    return `R$ ${sum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  }, [allData, filterTicker, filterYear, filterMonth]);
+    if (!allData || allData.length === 0) return "R$ 0,00";
+    const tickerMap = new Map<string, number>();
+    
+    // allData is chronological (sorted in processData)
+    allData.forEach(row => {
+      const ticker = String(row["Ticker"] || "").trim().toUpperCase();
+      if (!ticker || ticker === "MONTH CLOSING" || ticker === "TOTAL") return;
+      
+      // If we are looking for a specific ticker, skip others.
+      if (filterTicker !== "All" && ticker !== filterTicker.toUpperCase()) return;
+
+      const b3Raw = String(row["B3 Preço total"] || "").trim();
+      const scRaw = String(row["Saldo Custo"] || "").trim();
+      
+      // We look for the latest occurrence of a non-empty B3 total.
+      if (b3Raw !== "" && b3Raw !== "NOT FOUND" && b3Raw !== "0" && b3Raw !== "0,00") {
+        tickerMap.set(ticker, parseMoney(b3Raw));
+      } else if (scRaw !== "" && scRaw !== "0" && scRaw !== "0,00" && !tickerMap.has(ticker)) {
+        // Fallback to Cost only if we haven't seen a B3 value yet.
+        tickerMap.set(ticker, parseMoney(scRaw));
+      }
+    });
+
+    let total = 0;
+    tickerMap.forEach(v => total += v);
+    return `R$ ${total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }, [allData, filterTicker]);
 
   const computedYields = useMemo(() => {
-    if (!allData) return "R$ 0,00";
+    if (!allData || allData.length === 0) return "R$ 0,00";
     let sumYields = 0;
     
-    allData.forEach(row => {
-      const ticker = row["Ticker"];
-      if (!ticker || ticker.toUpperCase() === "MONTH CLOSING" || ticker.toUpperCase() === "TOTAL") return;
+    // Pad target month to ensure '4' matches '04'
+    const targetM = filterMonth === "All" ? "All" : filterMonth.padStart(2, '0');
+    const targetY = filterYear;
 
-      const parts = row["Data"] ? row["Data"].split('/') : [];
-      const m = parts.length === 3 ? parts[1] : "";
-      const y = parts.length === 3 ? parts[2] : "";
+    allData.forEach(row => {
+      const ticker = String(row["Ticker"] || "").trim().toUpperCase();
+      if (!ticker || ticker === "MONTH CLOSING" || ticker === "TOTAL") return;
+      if (filterTicker !== "All" && ticker !== filterTicker.toUpperCase()) return;
+
+      const d = String(row["Data"] || "").trim();
+      let rM = "";
+      let rY = "";
       
-      const matchYear = filterYear === "All" || normalizeYear(y) === filterYear;
-      const matchMonth = filterMonth === "All" || m === filterMonth;
-      const matchTicker = filterTicker === "All" || ticker === filterTicker;
+      if (d.includes('/')) {
+        const p = d.split('/');
+        if (p.length === 3) {
+          rM = p[1].padStart(2, '0');
+          rY = normalizeYear(p[2]);
+        }
+      } else if (d.includes('-')) {
+        const p = d.split('-');
+        if (p.length === 3) {
+          rY = p[0].length === 4 ? p[0] : normalizeYear(p[2]);
+          rM = p[1].padStart(2, '0');
+        }
+      }
       
-      if (matchYear && matchMonth && matchTicker && row["Yields"]) {
+      const matchYear = targetY === "All" || rY === targetY;
+      const matchMonth = targetM === "All" || rM === targetM;
+      
+      if (matchYear && matchMonth && row["Yields"]) {
         sumYields += parseMoney(row["Yields"]);
       }
     });
@@ -1278,16 +1435,13 @@ export default function App() {
     const latestB3Total = new Map<string, number>();
 
     allData.forEach(row => {
-      const ticker = row["Ticker"];
-      if (!ticker || ticker.toUpperCase() === "MONTH CLOSING" || ticker.toUpperCase() === "TOTAL") return;
+      const t = String(row["Ticker"] || "").trim().toUpperCase();
+      if (!t || t === "MONTH CLOSING" || t === "TOTAL") return;
 
-      // Keep tracking latest B3 Total per ticker
       const b3TotalStr = row["B3 Preço total"];
       if (b3TotalStr && b3TotalStr !== "NOT FOUND") {
-         const val = parseMoney(String(b3TotalStr));
-         if (val > 0) {
-           latestB3Total.set(ticker, val); 
-         }
+         const val = parseMoney(b3TotalStr);
+         if (val > 0) latestB3Total.set(t, val); 
       }
 
       const dStr = String(row["Data"] || "").trim();
@@ -1297,51 +1451,48 @@ export default function App() {
         y = parts.length === 3 ? parts[2] : "";
       } else if (dStr.includes('-')) {
         const parts = dStr.split('-');
-        if (parts.length === 3) {
-          y = parts[0].length === 4 ? parts[0] : parts[2];
-        }
+        if (parts.length === 3) y = parts[0].length === 4 ? parts[0] : parts[2];
       }
       const normY = normalizeYear(y);
 
       if (normY === selectedYieldYear || selectedYieldYear === "All") {
-        const transacaoSource = String(row["Transação"] || "").trim();
-        const tUpper = transacaoSource.toUpperCase();
-        
-        let matchedYieldType = "";
-        if (tUpper === "DIVIDENDOS" || tUpper === "DIVIDENDO") matchedYieldType = "Dividendos";
-        else if (tUpper.includes("JUROS S/ CAPITAL PRÓPRIO") || tUpper.includes("JCP")) matchedYieldType = "Juros s/ capital próprio";
-        else if (tUpper.includes("CLIENTE")) matchedYieldType = "Juros s/ capital cliente";
-        else if (tUpper.includes("FRAÇÃO") || tUpper.includes("FRACOES")) matchedYieldType = "Frações de ações";
-        else if (tUpper === "RENDIMENTOS" || tUpper === "RENDIMENTO") matchedYieldType = "Rendimentos";
+        const val = parseMoney(row["Yields"]);
+        if (val !== 0) {
+          const text = (row["Transação"] || "").toUpperCase();
+          let type = "RENDIMENTOS";
+          if (text.includes("DIVIDEND")) type = "DIVIDENDOS";
+          else if (text.includes("CLIENTE")) type = "JUROS S/ CAPITAL DE CLIENTES";
+          else if (text.includes("JCP") || text.includes("CAPITAL PRÓPRIO") || text.includes("JURO")) type = "JUROS S/ CAPITAL PRÓPRIO";
+          else if (text.includes("FRAÇÃO") || text.includes("FRACOES") || text.includes("FRACAO")) type = "FRAÇÕES DE AÇÕES";
 
-        if (matchedYieldType) {
-          const val = parseMoney(String(row["Yields"] || "0"));
-          if (val !== 0) {
-            foundTypes.add(matchedYieldType);
-            if (!grouped.has(ticker)) {
-              grouped.set(ticker, {});
-            }
-            grouped.get(ticker)![matchedYieldType] = (grouped.get(ticker)![matchedYieldType] || 0) + val;
-          }
+          foundTypes.add(type);
+          if (!grouped.has(t)) grouped.set(t, {});
+          grouped.get(t)![type] = (grouped.get(t)![type] || 0) + val;
         }
       }
     });
 
-    const data = Array.from(grouped.entries()).map(([ticker, values]) => {
+    const data = Array.from(grouped.entries()).map(([t, values]) => {
       let total = 0;
       Object.values(values).forEach(v => total += v);
       
-      const b3Total = latestB3Total.get(ticker) || 0;
+      const b3Total = latestB3Total.get(t) || 0;
       const percentage = b3Total > 0 ? (total / b3Total) * 100 : 0;
 
+      const percValues: any = {};
+      Object.entries(values).forEach(([k, v]) => {
+          percValues[k] = b3Total > 0 ? (v / b3Total) * 100 : 0;
+          percValues[`${k}_monetary`] = v; 
+      });
+
       return {
-        ticker,
+        ticker: t,
         total,
         b3Total,
         percentage,
-        ...values
+        ...percValues
       };
-    }).filter(item => item.total > 0).sort((a,b) => b.total - a.total);
+    }).filter(item => item.total > 0).sort((a,b) => b.percentage - a.percentage);
 
     return {
       data,
@@ -1350,11 +1501,11 @@ export default function App() {
   }, [allData, selectedYieldYear]);
 
   const YIELD_COLORS: Record<string, string> = {
-    'Dividendos': '#3B82F6',
-    'Juros s/ capital próprio': '#F59E0B',
-    'Juros s/ capital cliente': '#A855F7',
-    'Frações de ações': '#10B981',
-    'Rendimentos': '#EC4899'
+    'DIVIDENDOS': '#3B82F6',
+    'JUROS S/ CAPITAL PRÓPRIO': '#F59E0B',
+    'JUROS S/ CAPITAL DE CLIENTES': '#A855F7',
+    'FRAÇÕES DE AÇÕES': '#10B981',
+    'RENDIMENTOS': '#EC4899'
   };
 
   const computedAllocationData = useMemo(() => {
@@ -1539,6 +1690,25 @@ export default function App() {
           >
             <Upload className="w-5 h-5 group-hover:-translate-y-0.5 transition-transform" />
           </button>
+          {allData && allData.length > 0 && (
+            <button 
+              onClick={handleExportCSV}
+              className="p-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-500 rounded-xl transition-colors flex items-center justify-center group shadow-[0_0_15px_rgba(16,185,129,0.15)] flex-row gap-2 px-4"
+              title="Baixar/Salvar novo CSV com suas edições"
+            >
+              <Download className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
+              <span className="text-sm font-bold hidden sm:inline">Baixar Relatório</span>
+            </button>
+          )}
+          
+          {/* Always rendered hidden file input so buttons across all tabs can trigger it */}
+          <input 
+            type="file" 
+            accept=".csv"
+            className="hidden"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+          />
         </div>
       </motion.header>
 
@@ -1748,6 +1918,36 @@ export default function App() {
                     <LogOut className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
                     <span className="text-sm font-bold">Sair da Conta</span>
                   </button>
+
+                  <button 
+                    onClick={handleClearLocalCache}
+                    className="flex-1 min-w-[200px] p-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-500 rounded-xl transition-all flex items-center justify-center gap-2 group"
+                    title="Se o app estiver lento ou não estiver salvando, limpe o cache"
+                  >
+                    <Zap className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                    <div className="flex flex-col items-start translate-y-[-1px]">
+                      <span className="text-sm font-bold leading-tight">Limpar Cache Local</span>
+                      <span className="text-[10px] opacity-70">Uso: {memoryUsage} / 5MB</span>
+                    </div>
+                  </button>
+
+                  <button 
+                    onClick={handleLoadPublicFile}
+                    className="flex-1 min-w-[200px] p-3 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 rounded-xl transition-all flex items-center justify-center gap-2 group shadow-[inset_0_0_10px_rgba(99,102,241,0.1)]"
+                    title="Carregar arquivo CSV que você colocou na pasta pública"
+                  >
+                    <FileSearch className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                    <span className="text-sm font-bold">Importar do Servidor (Pasta Pública)</span>
+                  </button>
+
+                  <button 
+                    onClick={handleResetData}
+                    className="flex-1 min-w-[200px] p-3 bg-rose-900/20 hover:bg-rose-900/30 border border-rose-500/30 text-rose-400 rounded-xl transition-all flex items-center justify-center gap-2 group shadow-[inset_0_0_10px_rgba(244,63,94,0.1)]"
+                    title="Apagar dados locais e recarregar aplicativo"
+                  >
+                    <Trash2 className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                    <span className="text-sm font-bold">Limpar Banco de Dados Local</span>
+                  </button>
                 </div>
               </div>
             </motion.div>
@@ -1776,12 +1976,17 @@ export default function App() {
               </button>
               <div className="mt-8 flex flex-col items-center gap-2">
                 <p className="text-xs text-slate-500">Ou continue visualizando como um convidado importando seu arquivo.</p>
-                <button 
-                  onClick={() => fileInputRef.current?.click()}
-                  className="text-sm font-bold text-teal-400 hover:underline"
-                >
-                  Importar CSV localmente
-                </button>
+                <div className="flex flex-col items-center gap-1">
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-sm font-bold text-teal-400 hover:underline"
+                  >
+                    Importar CSV localmente
+                  </button>
+                  <span className="text-[10px] text-slate-500 text-center max-w-xs leading-tight">
+                    *Para salvamento garantido sem conta, abra o app em uma nova guia, ou instale-o no dispositivo. O uso integrado na prévia (iframe) limpa os dados ao fechar.
+                  </span>
+                </div>
               </div>
             </div>
           ) : (
@@ -1801,7 +2006,7 @@ export default function App() {
                         value={filterTicker}
                         onChange={(e) => setFilterTicker(e.target.value)}
                         disabled={!allData}
-                        className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[7rem] px-4 h-[42px] text-sm text-[var(--color-accent-teal)] font-bold focus:outline-none focus:ring-1 focus:ring-cyan-500 cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
+                        className="appearance-none text-center bg-white/5 backdrop-blur-md border border-white/10 shadow-[3px_3px_12px_rgba(0,0,0,0.5),inset_2px_2px_8px_rgba(255,255,255,0.1),inset_-2px_-2px_8px_rgba(0,0,0,0.4)] rounded-xl min-w-[6rem] px-4 h-[42px] text-sm text-[var(--color-accent-teal)] font-bold focus:outline-none focus:ring-1 focus:ring-cyan-500 cursor-pointer disabled:opacity-50 transition-all hover:bg-white/10 outline-none"
                       >
                         <option value="All" className="bg-slate-900 text-white">Todos</option>
                         {tickers.map(t => <option key={t} value={t} className="bg-slate-900 text-white">{t}</option>)}
@@ -1864,14 +2069,6 @@ export default function App() {
                       {computedPatrimonio}
                     </h2>
                   </div>
-                  
-                  <input 
-                    type="file" 
-                    accept=".csv"
-                    className="hidden"
-                    ref={fileInputRef}
-                    onChange={handleFileUpload}
-                  />
                 </div>
 
                 {/* Yields Card */}
@@ -2090,7 +2287,18 @@ export default function App() {
                           height={60}
                           interval={0}
                         />
-                        <YAxis hide />
+                        <YAxis 
+                          stroke="rgba(255,255,255,0.5)" 
+                          tick={{fill: 'rgba(255,255,255,0.7)', fontSize: 12}}
+                          tickFormatter={(tick) => `${Number(tick)}%`}
+                          width={60}
+                          domain={[0, (dataMax: number) => {
+                            const rounded = Math.ceil(dataMax);
+                            // Set a sensible minimum max value but let it grow automatically
+                            return rounded > 10 ? rounded : 10;
+                          }]}
+                          allowDataOverflow={true}
+                        />
                         <Tooltip
                           contentStyle={{ 
                             backgroundColor: 'rgba(13, 27, 42, 0.9)', 
@@ -2101,18 +2309,19 @@ export default function App() {
                           }}
                           itemStyle={{ fontSize: '12px' }}
                           formatter={(value: number, name: string, props: any) => {
-                            if (name === "total" || name === "percentage" || name === "b3Total") return [];
+                            if (name === "total" || name === "percentage" || name === "b3Total" || name.endsWith('_monetary')) return [];
                             
                             const b3Total = props.payload.b3Total;
+                            const monetaryValue = props.payload[`${name}_monetary`] || 0;
+                            
                             let percStr = "";
-                            if (b3Total > 0 && value > 0) {
-                              const partialPerc = (value / b3Total) * 100;
+                            if (b3Total > 0 && monetaryValue > 0) {
+                              const partialPerc = (monetaryValue / b3Total) * 100;
                               percStr = ` (${partialPerc.toFixed(2)}%)`;
                             }
-                            return [`R$ ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}${percStr}`, name];
+                            return [`R$ ${monetaryValue.toLocaleString('pt-BR', {minimumFractionDigits:2})}${percStr}`, name];
                           }}
                         />
-                        <Legend wrapperStyle={{ paddingTop: '20px' }} />
                         {computedYieldChartData.types.map((type, idx) => {
                           const isLast = computedYieldChartData.types.length === 1 || idx === computedYieldChartData.types.length - 1;
                           return (
@@ -2122,21 +2331,24 @@ export default function App() {
                               stackId="a" 
                               fill={YIELD_COLORS[type] || '#8884d8'} 
                               radius={isLast ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                              maxBarSize={60}
                             />
                           );
                         })}
                         <Line 
                           type="monotone" 
-                          dataKey="total" 
+                          dataKey="percentage" 
                           stroke="transparent" 
                           dot={{ r: 0, fill: 'transparent', stroke: 'transparent' }} 
                           activeDot={false}
+                          isAnimationActive={false}
                         >
                           <LabelList 
                             dataKey="percentage" 
                             position="top" 
-                            fill="#fff" 
-                            fontSize={11}
+                            fill="#2dd4bf" 
+                            fontSize={12}
+                            fontWeight="bold"
                             formatter={(val: number) => val > 0 ? `${val.toFixed(2)}%` : ""} 
                           />
                         </Line>
