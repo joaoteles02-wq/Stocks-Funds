@@ -237,53 +237,135 @@ export default function App() {
 
   const fetchFinancialMarketInfo = async (ticker: string, date: string) => {
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      // Hoy is 2026-04-20
-      const prompt = `Atue como um analista financeiro com acesso a dados em tempo real. 
-      Hoje é dia 20/04/2026.
+      const cleanTicker = ticker.trim().toUpperCase().replace(".SA", "");
+      const isBrazilian = /^[A-Z]{4}[0-9]{1,2}$/.test(cleanTicker) || cleanTicker === "BOVA11" || cleanTicker === "SMAL11";
       
-      Eu preciso das seguintes informações financeiras precisas para a data "${date}":
-      1. Preço de fechamento (ou cotação atual se for hoje) do ativo "${ticker}". 
-         - Se o ativo for brasileiro (ex: PETR4, VALE3, ITUB4), o preço deve ser em Reais (BRL).
-         - Se o ativo for americano (ex: AAPL, TSLA, MSFT), o preço deve ser em Dólares (USD).
-      2. Cotação do Dólar Comercial (USDBRL) para venda na data "${date}".
-      
-      Retorne APENAS um objeto JSON válido:
-      {
-        "price": number, // O preço unitário do ativo
-        "dollar": number // O valor de 1 USD em BRL (ex: 5.25)
-      }
-      
-      Use a ferramenta de busca para garantir que os valores são reais e atualizados para ${date}.`;
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} } as any],
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              price: { type: Type.NUMBER },
-              dollar: { type: Type.NUMBER }
-            },
-            required: ["price", "dollar"]
+      const fetchDollar = async () => {
+        try {
+          const signal = AbortSignal.timeout(8000);
+          const res = await fetch('https://brapi.dev/api/v2/currency?currency=USD-BRL', { signal });
+          if (res.ok) {
+            const data = await res.json();
+            const bid = parseFloat(data.currency?.[0]?.bidPrice);
+            if (!isNaN(bid)) return bid;
           }
+        } catch (e) {
+          console.error("Dollar fetch fallback", e);
         }
-      });
+        
+        try {
+          const signal2 = AbortSignal.timeout(8000);
+          const res2 = await fetch('/api/finance/quote', {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ tickers: ["USDBRL=X"] }),
+             signal: signal2
+          });
+          if (res2.ok) {
+             const data2 = await res2.json();
+             const q = data2.quotes?.["USDBRL=X"];
+             if (q?.price) return parseFloat(q.price);
+          }
+        } catch (e) {}
+        return 5.0;
+      };
 
-      const text = response.text || "{}";
-      const cleanJson = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-      return JSON.parse(cleanJson);
+      const fetchAsset = async () => {
+        const signal = AbortSignal.timeout(8000);
+        if (isBrazilian) {
+          // @ts-ignore
+          const token = (typeof process !== 'undefined' && process.env?.REACT_APP_BRAPI_TOKEN) || import.meta.env?.VITE_BRAPI_TOKEN || "";
+          const url = `https://brapi.dev/api/quote/${cleanTicker}?token=${token}&range=1y&interval=1d&fundamental=false&dividends=false`;
+          
+          const res = await fetch(url, { signal });
+          if (!res.ok) return null;
+          
+          const data = await res.json();
+          const result = data.results?.[0];
+          if (!result) return null;
+          
+          let varWeek = 0;
+          let varMonth = 0;
+          let var12m = 0;
+          const currPrice = result.regularMarketPrice;
+          
+          const history = result.historicalDataPrice;
+          if (history && history.length > 0) {
+              const now = Date.now() / 1000;
+              const getPriceAtDaysAgo = (days: number) => {
+                 const targetTime = now - (days * 24 * 60 * 60);
+                 let closest = history[0].close;
+                 let minDiff = Infinity;
+                 for (const h of history) {
+                    const diff = Math.abs(h.date - targetTime);
+                    if (diff < minDiff) { minDiff = diff; closest = h.close; }
+                 }
+                 return closest;
+              };
+              
+              const weekPrice = getPriceAtDaysAgo(7);
+              const monthPrice = getPriceAtDaysAgo(30);
+              const yearPrice = history[0].close;
+              
+              if (weekPrice) varWeek = ((currPrice - weekPrice) / weekPrice) * 100;
+              if (monthPrice) varMonth = ((currPrice - monthPrice) / monthPrice) * 100;
+              if (yearPrice) var12m = ((currPrice - yearPrice) / yearPrice) * 100;
+          }
+          
+          return {
+             price: currPrice,
+             varWeek,
+             varMonth,
+             var12m
+          };
+        } else {
+          // Yahoo Finance fetch via Backend for US Stocks
+          const res = await fetch('/api/finance/quote', {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ tickers: [cleanTicker] }),
+             signal
+          });
+          if (!res.ok) return null;
+          const data = await res.json();
+          const q = data.quotes?.[cleanTicker];
+          if (!q) return null;
+          return {
+             price: q.price,
+             varWeek: 0,
+             varMonth: 0,
+             var12m: 0
+          };
+        }
+      };
+
+      const results = await Promise.allSettled([fetchAsset(), fetchDollar()]);
+      
+      const assetInfo = results[0].status === 'fulfilled' ? results[0].value : null;
+      const dollarVal = results[1].status === 'fulfilled' ? results[1].value : 5.0;
+
+      if (!assetInfo) return null;
+
+      return {
+        price: assetInfo.price,
+        dollar: dollarVal,
+        varWeek: assetInfo.varWeek,
+        varMonth: assetInfo.varMonth,
+        var12m: assetInfo.var12m
+      };
+
     } catch (e) {
-      console.error("Gemini fetch failed", e);
+      console.error("Market fetch failed", e);
       return null;
     }
   };
 
   const fetchSwingTradeBatch = async (tickersToFetch: string[]) => {
-    if (tickersToFetch.length === 0) return;
+    console.log("DEBUG: fetchSwingTradeBatch called with tickers:", tickersToFetch);
+    if (tickersToFetch.length === 0) {
+      console.log("DEBUG: No tickers to fetch, returning.");
+      return;
+    }
     setIsFetchingSwing(true);
     console.log("Fetching Swing Data from Local API:", tickersToFetch);
     try {
@@ -293,7 +375,9 @@ export default function App() {
         body: JSON.stringify({ tickers: tickersToFetch })
       });
 
+      console.log("DEBUG: API response status:", response.status);
       if (!response.ok) {
+        console.error('DEBUG: Fetch failed with status', response.status);
         throw new Error('Failed to fetch from API');
       }
 
@@ -307,10 +391,10 @@ export default function App() {
         if (quoteInfo && typeof quoteInfo.price === 'number' && quoteInfo.price > 0) {
           updatedData[t] = { 
             currentPrice: quoteInfo.price,
-            perfWeek: "-",
-            perfMonth: "-",
-            perfYear: "-",
-            perfYTD: "-"
+            perfWeek: quoteInfo.variWeek != null ? `${quoteInfo.variWeek.toFixed(2)}%` : "-",
+            perfMonth: quoteInfo.variMonth != null ? `${quoteInfo.variMonth.toFixed(2)}%` : "-",
+            perfYear: quoteInfo.vari12Month != null ? `${quoteInfo.vari12Month.toFixed(2)}%` : "-",
+            perfYTD: "-" // API não retorna YTD diretamente, mantendo como placeholder
           };
         } else {
           updatedData[t] = {
@@ -373,7 +457,7 @@ export default function App() {
         "CNPJ": formCnpj,
         "B3 Preço Un": b3PrecoUn.toFixed(4),
         "B3 Preço total": b3PrecoTotal.toFixed(2),
-        "Dollar": dollar.toFixed(4),
+        "Dollar": '=INDEX(IFERROR(GOOGLEFINANCE("CURRENCY:USDBRL"; "price"; INDIRECT("A" & ROW())); GOOGLEFINANCE("CURRENCY:USDBRL"; "price"; INDIRECT("A" & ROW())-1)); 2; 2)',
         "Saldo de Un": unNum, // Para compatibilidade com a fórmula do usuário no futuro
         userId: user.uid,
         createdAt: serverTimestamp()
@@ -1770,18 +1854,11 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setShowSettings(!showSettings)}
-                className="p-2.5 bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 text-violet-500 rounded-xl transition-all flex items-center justify-center group shadow-[0_0_15px_rgba(139,92,246,0.15)]"
+                className="p-2.5 bg-violet-600/30 hover:bg-violet-500/40 border border-violet-400 text-violet-100 rounded-xl transition-all flex items-center justify-center group shadow-[0_0_20px_rgba(167,139,250,0.6)] backdrop-blur-md"
                 title="Configurações e Ações"
               >
                 <Settings className={`w-5 h-5 transition-transform duration-500 ${showSettings ? 'rotate-90' : 'group-hover:rotate-45'}`} />
               </button>
-              <div className="hidden sm:block glass-button p-1 rounded-full overflow-hidden">
-                <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-[var(--color-accent-violet)] to-[var(--color-accent-teal)] p-[2px]">
-                  <div className="w-full h-full rounded-full bg-slate-900 border border-white/20 flex items-center justify-center overflow-hidden">
-                     <img src={user.photoURL || "https://picsum.photos/seed/portrait/100/100"} alt="Avatar" className="w-full h-full object-cover opacity-80" referrerPolicy="no-referrer" />
-                  </div>
-                </div>
-              </div>
             </>
           ) : (
             <button 
@@ -1792,13 +1869,6 @@ export default function App() {
               Entrar
             </button>
           )}
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="p-2.5 bg-[var(--color-accent-teal)]/10 hover:bg-[var(--color-accent-teal)]/20 border border-[var(--color-accent-teal)]/30 text-[var(--color-accent-teal)] rounded-xl transition-colors flex items-center justify-center group shadow-[0_0_15px_rgba(45,212,191,0.15)]"
-            title="Importar CSV"
-          >
-            <Upload className="w-5 h-5 group-hover:-translate-y-0.5 transition-transform" />
-          </button>
           
           {/* Always rendered hidden file input so buttons across all tabs can trigger it */}
           <input 
@@ -1916,12 +1986,23 @@ export default function App() {
               className="overflow-hidden"
             >
               <div className="glass-panel p-6 rounded-[24px] flex flex-col gap-6 mb-4 border border-violet-500/30">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-xl font-bold flex items-center gap-2">
-                    <Table className="w-6 h-6 text-violet-400" />
-                    Integração Google Sheets
-                  </h3>
-                  <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white">✕</button>
+                <div className="flex justify-between items-center flex-wrap gap-4">
+                  <div className="flex items-center gap-4">
+                    {user && (
+                      <div className="glass-button p-1 rounded-full overflow-hidden shrink-0">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[var(--color-accent-violet)] to-[var(--color-accent-teal)] p-[2px]">
+                          <div className="w-full h-full rounded-full bg-slate-900 border border-white/20 flex items-center justify-center overflow-hidden">
+                             <img src={user.photoURL || "https://picsum.photos/seed/portrait/100/100"} alt="Avatar" className="w-full h-full object-cover opacity-80" referrerPolicy="no-referrer" />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <h3 className="text-xl font-bold flex items-center gap-2">
+                      <Table className="w-6 h-6 text-violet-400" />
+                      Integração Google Sheets
+                    </h3>
+                  </div>
+                  <button onClick={() => setShowSettings(false)} className="text-slate-400 hover:text-white p-2">✕</button>
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -2003,11 +2084,11 @@ export default function App() {
                   </button>
 
                   <button 
-                    onClick={handleExportCSV}
-                    className="flex-1 min-w-[140px] p-3 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-500 rounded-xl transition-all flex items-center justify-center gap-2 group"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex-1 min-w-[200px] p-3 bg-[var(--color-accent-teal)]/10 hover:bg-[var(--color-accent-teal)]/20 border border-[var(--color-accent-teal)]/30 text-[var(--color-accent-teal)] rounded-xl transition-all flex items-center justify-center gap-2 group"
                   >
-                    <Download className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
-                    <span className="text-sm font-bold">Exportar CSV</span>
+                    <Upload className="w-5 h-5 group-hover:-translate-y-0.5 transition-transform" />
+                    <span className="text-sm font-bold">Importar Relatório B3 (CSV)</span>
                   </button>
 
                   <button 

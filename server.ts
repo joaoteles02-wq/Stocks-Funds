@@ -19,63 +19,78 @@ const PORT = 3000;
 app.set("trust proxy", true);
 app.use(express.json());
 
-// API para buscar cotações via yahoo-finance2
+// API para buscar cotações detalhadas
 app.post("/api/finance/quote", async (req, res) => {
   const { tickers } = req.body;
   if (!tickers || !Array.isArray(tickers)) {
     return res.status(400).json({ error: "Tickers not provided" });
   }
 
-  try {
-    const results: Record<string, any> = {};
-    const formattedTickers = tickers.map(t => {
-      const clean = t.trim().toUpperCase();
-      if (/^[A-Z]{4}[0-9]{1,2}$/.test(clean)) {
-        return `${clean}.SA`;
-      }
-      return clean;
-    });
+  const results: Record<string, any> = {};
+  const brapiToken = process.env.BRAPI_TOKEN || "";
 
-    let quotesObj: any = [];
+  const fetchAsset = async (ticker: string) => {
+    const cleanTicker = ticker.trim().toUpperCase().replace(".SA", "");
+    const isBrazilian = /^[A-Z]{4}[0-9]{1,2}$/.test(cleanTicker) || cleanTicker === "BOVA11" || cleanTicker === "SMAL11";
+    const signal = AbortSignal.timeout(8000);
+
     try {
-      quotesObj = await yahooFinance.quote(formattedTickers, { returnEmptyArray: true, validateResult: false } as any);
-    } catch (err) {
-      console.log("Bulk quote failed:", err);
-    }
-    
-    const quotesArray: any[] = Array.isArray(quotesObj) ? quotesObj : [quotesObj];
-    
-    // If bulk fetch failed (it sometimes fails if 1 ticker is invalid), fallback to individual fetches
-    if (quotesArray.length === 0 || !quotesArray[0]) {
-      console.log("Bulk fetch failed, falling back to individual fetches");
-      const promises = formattedTickers.map(async (t) => {
-        try {
-          return await yahooFinance.quote(t);
-        } catch {
-          return null;
-        }
-      });
-      const indRes = await Promise.all(promises);
-      indRes.forEach(q => {
-        if (q && q.symbol) {
-          const originalSymbol = q.symbol.replace('.SA', '');
-          results[originalSymbol] = { price: q.regularMarketPrice || q.price, currency: q.currency };
-        }
-      });
-    } else {
-      quotesArray.forEach(q => {
-        if (q && q.symbol) {
-          const originalSymbol = q.symbol.replace('.SA', '');
-          results[originalSymbol] = { price: q.regularMarketPrice || q.price, currency: q.currency };
-        }
-      });
-    }
+      if (isBrazilian && brapiToken) {
+        console.log(`[Debug] Fetching B3 for ${cleanTicker} via Brapi`);
+        const url = `https://brapi.dev/api/quote/${cleanTicker}?token=${brapiToken}&range=1y&interval=1d&fundamental=false&dividends=false`;
+        const res = await fetch(url, { signal });
+        
+        if (res.ok) {
+           const data = await res.json();
+           const result = data.results?.[0];
+           if (result) {
+              let varWeek = 0; let varMonth = 0; let var12m = 0;
+              const currPrice = result.regularMarketPrice;
+              const history = result.historicalDataPrice;
 
-    res.json({ quotes: results });
-  } catch (error) {
-    console.error("Error fetching quotes:", error);
-    res.status(500).json({ error: "Failed to fetch quotes" });
-  }
+              if (history && history.length > 0) {
+                const now = Date.now() / 1000;
+                const getPriceFrom = (days: number) => {
+                  const target = now - (days * 24 * 60 * 60);
+                  return history.reduce((prev: any, curr: any) => 
+                     Math.abs(curr.date - target) < Math.abs(prev.date - target) ? curr : prev
+                  ).close;
+                };
+                const week = getPriceFrom(7);
+                const month = getPriceFrom(30);
+                const year = history[0].close;
+                if (week) varWeek = ((currPrice - week) / week) * 100;
+                if (month) varMonth = ((currPrice - month) / month) * 100;
+                if (year) var12m = ((currPrice - year) / year) * 100;
+              }
+              return { price: currPrice, variWeek: varWeek, variMonth: varMonth, vari12Month: var12m };
+           }
+        }
+        console.log(`[Debug] Brapi failed for ${cleanTicker}, falling back to Yahoo`);
+      }
+      
+      // Fallback ou padrão internacional
+      const quote = await yahooFinance.quote(`${cleanTicker}.SA` || cleanTicker);
+      if (!quote) return null;
+      return { price: quote.regularMarketPrice || quote.price, variWeek: 0, variMonth: 0, vari12Month: 0 };
+    } catch (e) {
+      console.error(`Error fetching ${ticker}:`, e);
+      return null;
+    }
+  };
+
+  const promises = tickers.map(t => fetchAsset(t));
+  const settledResults = await Promise.allSettled(promises);
+
+  tickers.forEach((t, i) => {
+    if (settledResults[i].status === 'fulfilled' && settledResults[i].value) {
+      results[t] = settledResults[i].value;
+    } else {
+        console.log(`[Debug] Ticker ${t} failed or returned null`);
+    }
+  });
+
+  res.json({ quotes: results });
 });
 
 // Google OAuth Setup
