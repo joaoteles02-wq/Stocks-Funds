@@ -23,7 +23,8 @@ service cloud.firestore {
     function isValidInvestment(data) {
       return data.Data is string && data.Data.size() <= 20 
           && data.Ticker is string && data.Ticker.size() <= 20
-          && data.userId == request.auth.uid;
+          && data.userId == request.auth.uid
+          && data.createdAt is timestamp;
     }
 
     match /investments/{investId} {

@@ -64,6 +64,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  getDocs,
   deleteDoc
 } from 'firebase/firestore';
 
@@ -104,7 +105,7 @@ const normalizeHeader = (header: string) => {
   
   if (norm.includes('dollar') || norm.includes('dolar') || norm.includes('dólar')) return 'Dollar';
   if (norm === 'date' || norm === 'data' || norm.startsWith('data') || norm.includes('negôcio') || norm.includes('negócio') || norm.includes('negocio') || norm.includes('pregao') || norm.includes('pregão') || norm === 'dia' || norm.includes('liquidação') || norm.includes('liquidacao') || norm.includes('movimentação')) return 'Data';
-  if (norm === 'ticker' || norm === 'ativo' || norm === 'papel' || norm.includes('código') || norm.includes('codigo') || norm.includes('instrumento') || norm.includes('produto') || norm.includes('símbolo') || norm.includes('simbolo') || norm.includes('ação') || norm.includes('acao') || norm.includes('descrição') || norm.includes('descricao')) return 'Ticker';
+  if (norm === 'ticker' || norm === 'ativo' || norm === 'papel' || norm.includes('código') || norm.includes('codigo') || norm.includes('símbolo') || norm.includes('simbolo')) return 'Ticker';
   if (norm.includes('transation') || norm.includes('transaction') || norm.includes('transação') || norm.includes('transacao') || norm.includes('operação') || norm.includes('operacao') || norm.includes('tipo de ordem') || norm === 'tipo' || norm === 'movimentacao') return 'Transação';
   if (norm.includes('stock proceeds') || norm.includes('stockproceeds') || norm.includes('yields') || norm.includes('rendimentos') || norm.includes('proventos') || norm.includes('dividendos') || norm.includes('juros') || norm.includes('jcp') || norm === 'valor bruto' || norm === 'rendimento') return 'Yields';
   if (norm === 'units' || norm === 'un' || norm === 'unit' || norm.includes('quantidade') || norm.includes('qtd') || norm === 'volume' || norm === 'quantidade (un)') return 'UN';
@@ -215,6 +216,7 @@ export default function App() {
   const [selectedYieldYear, setSelectedYieldYear] = useState<string>(currentYear);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isUploadingRef = useRef(false);
 
   // Form States
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
@@ -477,30 +479,54 @@ export default function App() {
     if (!rowToDelete) return;
 
     try {
+      setSyncing(true);
       if (rowToDelete.id) {
         // From Firestore
-        setSyncing(true);
         await deleteDoc(doc(db, "investments", rowToDelete.id));
-        setSyncing(false);
+      } else if (user) {
+        // Try to find in Firestore by matching fields
+        const q = query(
+          collection(db, "investments"),
+          where("userId", "==", user.uid),
+          where("Ticker", "==", rowToDelete.Ticker),
+          where("Data", "==", rowToDelete.Data),
+          where("UN", "==", String(rowToDelete.UN))
+        );
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) {
+          await deleteDoc(doc(db, "investments", snapshot.docs[0].id));
+        } else {
+            // Local fallback
+            const saved = localStorage.getItem('saved_csv_data');
+            if (saved) {
+              const results = Papa.parse(saved, { header: true, skipEmptyLines: true });
+              const newData = results.data.filter((r: any) => {
+                return !(r.Ticker === rowToDelete.Ticker && r.Data === rowToDelete.Data && r.UN === String(rowToDelete.UN));
+              });
+              const newCsv = Papa.unparse(newData);
+              localStorage.setItem('saved_csv_data', newCsv);
+            }
+        }
       } else {
-        // Local Data (CSV)
+        // Local Data (CSV) only
         const saved = localStorage.getItem('saved_csv_data');
         if (saved) {
           const results = Papa.parse(saved, { header: true, skipEmptyLines: true });
-          // Find original match for local records
           const newData = results.data.filter((r: any) => {
             return !(r.Ticker === rowToDelete.Ticker && r.Data === rowToDelete.Data && r.UN === String(rowToDelete.UN));
           });
           const newCsv = Papa.unparse(newData);
           localStorage.setItem('saved_csv_data', newCsv);
-          
-          // Re-process local data state manually for instant update
-          setAllData(prev => prev ? prev.filter(r => r !== rowToDelete) : null);
         }
       }
+      
+      // Update state
+      setAllData(prev => prev ? prev.filter(r => r !== rowToDelete) : null);
+      setSyncing(false);
       setRowToDelete(null);
     } catch (error) {
       console.error("Delete failed", error);
+      setSyncing(false);
       alert("Erro ao excluir registro.");
     }
   };
@@ -531,6 +557,8 @@ export default function App() {
       // Load Data
       const q = query(collection(db, "investments"), where("userId", "==", user.uid));
       const unsubscribe = onSnapshot(q, (snapshot) => {
+        if (isUploadingRef.current) return; // ignora durante upload
+
         const cloudData = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()
@@ -741,29 +769,7 @@ export default function App() {
     }
   };
 
-  // Firestore Sync Effect
-  useEffect(() => {
-    if (!user) {
-      setAllData(null);
-      return;
-    }
-
-    const q = query(
-      collection(db, "investments"),
-      where("userId", "==", user.uid)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      
-      setAllData(processDataPure(data));
-    });
-
-    return () => unsubscribe();
-  }, [user]);
+  // Firestore Sync Effect - REMOVED AS IT WAS DUPLICATE AND CAUSING DATA OVERWRITES
 
   const handleLogin = async () => {
     try {
@@ -950,12 +956,11 @@ export default function App() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       const text = e.target?.result as string;
       if (!text) return;
       
       const cleanCsv = text.replace(/,\s+"/g, ',"').replace(/"\s+,/g, '",');
-      // Salva o CSV na memória do navegador para não precisar submeter de novo
       localStorage.setItem('saved_csv_data', cleanCsv);
       
       Papa.parse(cleanCsv, {
@@ -963,10 +968,81 @@ export default function App() {
         skipEmptyLines: true,
         transformHeader: normalizeHeader,
         transform: (value) => value.trim(),
-        complete: (results) => {
+        complete: async (results) => {
+          isUploadingRef.current = true; // ADICIONAR ESTA LINHA
           setTableColumns(results.meta.fields || []);
-          processData(results.data as any[]);
+          
+          const processed = processDataPure(results.data as any[]);
+          
+          // Atualiza estado local imediatamente (não espera Firestore)
+          setAllData(processed);
+          setTableColumns(REQUIRED_COLUMNS);
           if (fileInputRef.current) fileInputRef.current.value = "";
+
+          if (user) {
+            setSyncing(true);
+            
+            // PASSO 1: Tenta deletar antigos (falha silenciosa)
+            try {
+              const oldQuery = query(
+                collection(db, "investments"),
+                where("userId", "==", user.uid)
+              );
+              const oldSnapshot = await getDocs(oldQuery);
+              
+              if (oldSnapshot.docs.length > 0) {
+                let deleteBatch = writeBatch(db);
+                let deleteCount = 0;
+                oldSnapshot.docs.forEach((docSnap) => {
+                  deleteBatch.delete(docSnap.ref);
+                  deleteCount++;
+                });
+                await deleteBatch.commit();
+                console.log(`${deleteCount} documentos antigos deletados.`);
+              }
+            } catch (err) {
+              // Se delete falhar, continua mesmo assim
+              console.warn("Aviso: não foi possível limpar dados antigos.", err);
+            }
+
+            // PASSO 2: Salva novos dados (independente do passo 1)
+            try {
+              let batch = writeBatch(db);
+              let count = 0;
+
+              for (const row of processed) {
+                if (!row.id) {
+                  const newDocRef = doc(collection(db, "investments"));
+                  const { _yields_fixed, _un_fixed, _preco_fixed, ...cleanRow } = row;
+                  const safeRow = Object.fromEntries(
+                    Object.entries(cleanRow).filter(([_, v]) => v !== undefined)
+                  );
+                  batch.set(newDocRef, {
+                    ...safeRow,
+                    userId: user.uid,
+                    createdAt: serverTimestamp()
+                  });
+                  count++;
+                  if (count >= 400) {
+                    await batch.commit();
+                    batch = writeBatch(db);
+                    count = 0;
+                  }
+                }
+              }
+              if (count > 0) await batch.commit();
+              alert(`${processed.length} registros salvos na nuvem com sucesso!`);
+            } catch (err) {
+              console.error("Erro ao salvar novos dados:", err);
+              alert("Erro ao salvar na nuvem, mas seus dados estão visíveis localmente.");
+            } finally {
+              setSyncing(false);
+              // Aguarda 3 segundos e então reativa o listener
+              setTimeout(() => {
+                isUploadingRef.current = false;
+              }, 3000);
+            }
+          }
         },
       });
     };
@@ -1158,10 +1234,14 @@ export default function App() {
       row["Saldo Custo"] = `R$ ${state.saldoCusto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
       row["Preço Médio"] = precoMedio > 0 ? `R$ ${precoMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : "";
       
-      // B3 Pricing (Mantém lógica anterior se já existir valor de mercado vindo do CSV ou se quiser re-calcular)
-      // Para brevidade e foco na correção do desaparecimento, mantemos a lógica de formatação de B3 se o valor existir
+      // B3 Pricing (Só recalcula se o CSV não trouxe o valor já calculado)
       const b3Un = parseNum(row["B3 Preço Un"]);
-      if (b3Un > 0) {
+      const b3TotalExistente = String(row["B3 Preço total"] || "").trim();
+      const jaTemB3Total = b3TotalExistente !== "" && 
+                           b3TotalExistente !== "NOT FOUND" && 
+                           b3TotalExistente !== "0";
+      
+      if (b3Un > 0 && !jaTemB3Total) {
         const dollar = parseNum(row["Dollar"] || 1);
         const corretora = String(row["Banco/Corretora"] || "").toUpperCase();
         let b3Total = state.saldoUn * b3Un;
@@ -1177,7 +1257,17 @@ export default function App() {
 
   const tickers = useMemo(() => {
     if (!allData) return [];
-    return Array.from(new Set(allData.map(r => r["Ticker"]).filter(t => t && t.toUpperCase() !== 'MONTH CLOSING'))).sort();
+
+    const validTickers = new Set<string>();
+    
+    allData.forEach(r => {
+        const t = String(r["Ticker"]).trim().toUpperCase();
+        if (!t || t === "" || t === "MONTH CLOSING" || t === "TOTAL") return;
+        
+        validTickers.add(t);
+    });
+
+    return Array.from(validTickers).sort();
   }, [allData]);
 
   // Auto-fetch Swing Trade Data when tab is selected
