@@ -1259,15 +1259,34 @@ export default function App() {
     if (!allData) return [];
 
     const validTickers = new Set<string>();
+    const tickerLastBalance = new Map<string, number>();
     
     allData.forEach(r => {
         const t = String(r["Ticker"]).trim().toUpperCase();
         if (!t || t === "" || t === "MONTH CLOSING" || t === "TOTAL") return;
         
         validTickers.add(t);
+
+        // Obtém e guarda o último saldo atualizado do ticker.
+        // A lista allData é processada em ordem cronológica, então 
+        // tickerLastBalance vai sempre guardar a posição FINAL mais recente.
+        const b3Raw = String(r["B3 Preço total"] || "").trim();
+        const scRaw = String(r["Saldo Custo"] || "").trim();
+        
+        let val = 0;
+        if (b3Raw !== "" && b3Raw !== "NOT FOUND") {
+            val = parseMoney(b3Raw);
+        } else {
+            val = parseMoney(scRaw);
+        }
+        tickerLastBalance.set(t, val);
     });
 
-    return Array.from(validTickers).sort();
+    // Pega a lista apenas com os que NÃO estão zerados no final
+    return Array.from(validTickers).filter(t => {
+        const finalVal = tickerLastBalance.get(t) || 0;
+        return Math.abs(finalVal) > 0.01;
+    }).sort();
   }, [allData]);
 
   // Auto-fetch Swing Trade Data when tab is selected
@@ -1780,16 +1799,6 @@ export default function App() {
           >
             <Upload className="w-5 h-5 group-hover:-translate-y-0.5 transition-transform" />
           </button>
-          {allData && allData.length > 0 && (
-            <button 
-              onClick={handleExportCSV}
-              className="p-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-500 rounded-xl transition-colors flex items-center justify-center group shadow-[0_0_15px_rgba(16,185,129,0.15)] flex-row gap-2 px-4"
-              title="Baixar/Salvar novo CSV com suas edições"
-            >
-              <Download className="w-5 h-5 group-hover:translate-y-0.5 transition-transform" />
-              <span className="text-sm font-bold hidden sm:inline">Baixar Relatório</span>
-            </button>
-          )}
           
           {/* Always rendered hidden file input so buttons across all tabs can trigger it */}
           <input 
@@ -2218,7 +2227,7 @@ export default function App() {
                     </h3>
                   </div>
                   
-                  <div className="flex-1 w-full -ml-4 min-h-[120px]">
+                  <div className="flex-1 w-full min-h-[120px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={computedChartData}>
                         <defs>
@@ -2467,9 +2476,6 @@ export default function App() {
                    <div className="flex flex-col gap-4">
                      <div className="flex justify-between items-center mb-2">
                        <h3 className="font-semibold text-lg">Histórico</h3>
-                       <span className="text-sm text-[var(--color-accent-violet)] font-medium bg-[var(--color-accent-violet)]/10 px-3 py-1 rounded-lg">
-                         {filteredData.length} registros no filtro
-                       </span>
                      </div>
                      
                      <div className="glass-panel p-2 rounded-[24px]">
