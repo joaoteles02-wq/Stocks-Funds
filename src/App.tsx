@@ -235,9 +235,26 @@ export default function App() {
 
   const isTrade = formTransacao === "Compra" || formTransacao === "Venda";
 
+  const handleCurrencyChange = (setter: React.Dispatch<React.SetStateAction<string>>) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    let value = e.target.value;
+    value = value.replace(/\D/g, ""); // remove all non-digits
+    if (value === "") { setter(""); return; }
+    
+    let numValue = (parseInt(value, 10) / 100).toFixed(2);
+    let formatted = numValue.replace(".", ",").replace(/(\d)(?=(\d{3})+(?!\d))/g, "$1.");
+    setter(`R$ ${formatted}`);
+  };
+
+  const parseFormattedNumber = (val: string) => {
+    if (!val) return 0;
+    const cleanVal = val.replace(/R\$\s?/g, '').replace(/\./g, '').replace(',', '.');
+    return parseFloat(cleanVal) || 0;
+  };
+
   const fetchFinancialMarketInfo = async (ticker: string, date: string) => {
     try {
-      const cleanTicker = ticker.trim().toUpperCase().replace(".SA", "");
+      let cleanTicker = ticker.trim().toUpperCase().replace(".SA", "");
+      if (cleanTicker.startsWith("BVMF:")) cleanTicker = cleanTicker.substring(5);
       const isBrazilian = /^[A-Z]{4}[0-9]{1,2}$/.test(cleanTicker) || cleanTicker === "BOVA11" || cleanTicker === "SMAL11";
       
       const fetchDollar = async () => {
@@ -432,7 +449,8 @@ export default function App() {
       const b3PrecoUn = marketInfo?.price || 0;
       const dollar = marketInfo?.dollar || 5.0; // Fallback se falhar
       
-      const unNum = parseFloat(formUn) || 0;
+      const unNum = parseFormattedNumber(formUn);
+      const precoUnNum = parseFormattedNumber(formPrecoUn);
       const bancoCorretora = formCorretora;
       
       // B3 Preço total = IFERROR(IF(Banco/Corretora ="Nomad";Saldo de Un*B3 Preço Un*Dollar;Saldo de Un*B3 Preço Un);"")
@@ -447,7 +465,7 @@ export default function App() {
       const newRecord = {
         "Data": formattedDate,
         "Ticker": ticker,
-        "Transação": formTransacao,
+        "Transação": formTransacao.toUpperCase(),
         "Tipo Atividade": formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade,
         "UN": isTrade ? formUn : "",
         "Preço Un de Custo": isTrade ? formPrecoUn : "",
@@ -455,9 +473,9 @@ export default function App() {
         "IR": formIr,
         "Banco/Corretora": bancoCorretora,
         "CNPJ": formCnpj,
-        "B3 Preço Un": b3PrecoUn.toFixed(4),
-        "B3 Preço total": b3PrecoTotal.toFixed(2),
-        "Dollar": '=INDEX(IFERROR(GOOGLEFINANCE("CURRENCY:USDBRL"; "price"; INDIRECT("A" & ROW())); GOOGLEFINANCE("CURRENCY:USDBRL"; "price"; INDIRECT("A" & ROW())-1)); 2; 2)',
+        "B3 Preço Un": b3PrecoUn.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+        "B3 Preço total": b3PrecoTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+        "Dollar": dollar.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
         "Saldo de Un": unNum, // Para compatibilidade com a fórmula do usuário no futuro
         userId: user.uid,
         createdAt: serverTimestamp()
@@ -564,44 +582,59 @@ export default function App() {
 
     try {
       setSyncing(true);
-      if (rowToDelete.id) {
-        // From Firestore
-        await deleteDoc(doc(db, "investments", rowToDelete.id));
-      } else if (user) {
-        // Try to find in Firestore by matching fields
-        const q = query(
-          collection(db, "investments"),
-          where("userId", "==", user.uid),
-          where("Ticker", "==", rowToDelete.Ticker),
-          where("Data", "==", rowToDelete.Data),
-          where("UN", "==", String(rowToDelete.UN))
-        );
-        const snapshot = await getDocs(q);
-        if (!snapshot.empty) {
-          await deleteDoc(doc(db, "investments", snapshot.docs[0].id));
-        } else {
-            // Local fallback
-            const saved = localStorage.getItem('saved_csv_data');
-            if (saved) {
-              const results = Papa.parse(saved, { header: true, skipEmptyLines: true });
-              const newData = results.data.filter((r: any) => {
-                return !(r.Ticker === rowToDelete.Ticker && r.Data === rowToDelete.Data && r.UN === String(rowToDelete.UN));
-              });
-              const newCsv = Papa.unparse(newData);
-              localStorage.setItem('saved_csv_data', newCsv);
-            }
-        }
-      } else {
-        // Local Data (CSV) only
-        const saved = localStorage.getItem('saved_csv_data');
-        if (saved) {
-          const results = Papa.parse(saved, { header: true, skipEmptyLines: true });
-          const newData = results.data.filter((r: any) => {
-            return !(r.Ticker === rowToDelete.Ticker && r.Data === rowToDelete.Data && r.UN === String(rowToDelete.UN));
+      // Delete from Sheets first if connected
+      if (sheetsConnected && spreadsheetId && sheetsTokens) {
+        try {
+          const cleanId = spreadsheetId.includes('/d/') 
+            ? spreadsheetId.split('/d/')[1].split('/')[0] 
+            : spreadsheetId.trim();
+            
+          await fetch('/api/sheets/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tokens: sheetsTokens,
+              spreadsheetId: cleanId,
+              rowData: rowToDelete
+            })
           });
-          const newCsv = Papa.unparse(newData);
-          localStorage.setItem('saved_csv_data', newCsv);
+        } catch (sheetsErr) {
+          console.error("Error deleting from sheets:", sheetsErr);
+          // Decidimos continuar e excluir localmente mesmo se falhar na planilha
         }
+      }
+
+      let targetDocId = rowToDelete.id;
+      
+      if (!targetDocId && user && allData) {
+        // Try to find the document ID from our loaded data
+        const match = allData.find(r => 
+          r.Ticker === rowToDelete.Ticker && 
+          r.Data === rowToDelete.Data && 
+          String(r.UN) === String(rowToDelete.UN) &&
+          r.id
+        );
+        if (match) {
+          targetDocId = match.id;
+        }
+      }
+
+      if (targetDocId) {
+        console.log(`[Debug] Deleting document ID: ${targetDocId}`);
+        await deleteDoc(doc(db, "investments", targetDocId));
+      } else {
+        console.log(`[Debug] Document not found in Firestore. Deleting purely locally...`);
+      }
+
+      // Local fallback for CSV (saved_csv_data)
+      const saved = localStorage.getItem('saved_csv_data');
+      if (saved) {
+        const results = Papa.parse(saved, { header: true, skipEmptyLines: true });
+        const newData = results.data.filter((r: any) => {
+          return !(r.Ticker === rowToDelete.Ticker && r.Data === rowToDelete.Data && r.UN === String(rowToDelete.UN));
+        });
+        const newCsv = Papa.unparse(newData);
+        localStorage.setItem('saved_csv_data', newCsv);
       }
       
       // Update state
@@ -820,6 +853,32 @@ export default function App() {
     }
   };
 
+  const handleDisconnectSheets = async () => {
+    if (!user) return;
+    
+    if (confirm("Tem certeza que deseja desconectar o Google Sheets?")) {
+      try {
+        setSyncing(true);
+        // Remove from UI state
+        setSheetsConnected(false);
+        setSheetsTokens(null);
+        
+        // Remove from Firestore config 
+        await setDoc(doc(db, 'users', user.uid, 'config', 'sheets'), {
+          sheetsConnected: false,
+          sheetsTokens: null
+        }, { merge: true });
+        
+        alert("Google Sheets desconectado com sucesso.");
+      } catch (error) {
+        console.error("Error disconnecting:", error);
+        alert("Erro ao desconectar Google Sheets.");
+      } finally {
+        setSyncing(false);
+      }
+    }
+  };
+
   const handleAppendToSheets = async (record: any) => {
     if (!sheetsTokens || !spreadsheetId) return;
 
@@ -827,8 +886,24 @@ export default function App() {
       ? spreadsheetId.split('/d/')[1].split('/')[0] 
       : spreadsheetId.trim();
 
-    // Map record to array matching COLUMNS
-    const rowDataArr = REQUIRED_COLUMNS.map(col => record[col] || "");
+    const rowDataArr = new Array(24).fill("");
+    rowDataArr[3] = record["Data"] || "";
+    rowDataArr[4] = record["Ticker"] || "";
+    rowDataArr[5] = String(record["Transação"] || "").toUpperCase();
+    rowDataArr[6] = record["Yields"] || "";
+    rowDataArr[7] = record["UN"] || "";
+    rowDataArr[8] = record["Saldo de Un"] || "";
+    rowDataArr[9] = record["Preço Un de Custo"] || "";
+    rowDataArr[10] = record["Total do Custo"] || "";
+    rowDataArr[11] = record["Saldo do Custo"] || "";
+    rowDataArr[12] = record["Preço Médio"] || "";
+    rowDataArr[13] = record["B3 Preço Un"] || "";
+    rowDataArr[14] = record["B3 Preço total"] || "";
+    rowDataArr[19] = record["Tipo Atividade"] || "";
+    rowDataArr[20] = record["Banco/Corretora"] || "";
+    rowDataArr[21] = record["CNPJ"] || "";
+    rowDataArr[22] = record["IR"] || "";
+    rowDataArr[23] = record["Dollar"] || "";
 
     try {
       const resp = await fetch('/api/sheets/append', {
@@ -844,7 +919,16 @@ export default function App() {
       if (!resp.ok) {
         const err = await resp.json();
         console.error("Sheets Append Error:", err);
-        alert(`Aviso: O registro foi salvo no App, mas não pôde ser enviado para o Google Sheets: ${err.details || err.error}`);
+        const errorMsg = err.details || err.error || "Erro desconhecido";
+        
+        let userAction = "";
+        if (errorMsg.includes("Google Sheets API has not been used")) {
+          userAction = "\\n\\nImportante: Você precisa habilitar a 'Google Sheets API' no seu Google Cloud Console.";
+        } else if (errorMsg.includes("Requested entity was not found")) {
+          userAction = "\\n\\nImportante: O ID da planilha está incorreto ou a planilha não existe.";
+        }
+        
+        alert(`Aviso: O registro foi salvo no App, mas não pôde ser enviado para o Google Sheets.\\nDetalhes do erro: ${errorMsg}${userAction}`);
       } else {
         console.log("Successfully appended to Sheets");
       }
@@ -2007,7 +2091,7 @@ export default function App() {
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="flex flex-col gap-4">
-                    <p className="text-sm text-slate-400">
+                    <p className="text-sm text-white font-medium">
                       Conecte sua planilha Google para que o SaaS sincronize automaticamente cada nova operação. Seus dados estarão sempre protegidos e restritos ao seu acesso.
                     </p>
                     
@@ -2020,9 +2104,19 @@ export default function App() {
                         Conectar Google Sheets
                       </button>
                     ) : (
-                      <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center gap-3 text-emerald-400 font-medium">
-                        <CheckCircle2 className="w-5 h-5" />
-                        Google Sheets Conectado
+                      <div className="flex flex-col gap-2">
+                        <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-center justify-between gap-3 text-emerald-400 font-medium">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="w-5 h-5" />
+                            Google Sheets Conectado
+                          </div>
+                          <button 
+                            onClick={handleDisconnectSheets}
+                            className="bg-red-500/20 text-red-400 hover:bg-red-500/30 text-xs py-1 px-3 rounded-lg border border-red-500/30 transition-colors"
+                          >
+                            Desconectar
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -2064,70 +2158,105 @@ export default function App() {
                         Sincronizar dados da Planilha
                       </button>
                     )}
-                    <p className="text-[10px] text-slate-500 italic">
+                    <p className="text-xs text-white font-medium mt-1">
                       Dica: O ID é a parte da URL entre '/d/' e '/edit'. Ex: docs.google.com/spreadsheets/d/<b>SEU_ID_AQUI</b>/edit
                     </p>
                   </div>
                 </div>
 
                 {/* Quick Actions moved here */}
-                <div className="mt-4 pt-6 border-t border-white/10 flex flex-wrap items-center gap-4">
-                  <h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest w-full mb-1">Ações de Conta & Dados</h4>
+                <div className="mt-8 pt-6 border-t border-white/10 flex flex-col gap-6">
+                  <h4 className="text-sm font-bold text-white uppercase tracking-widest mb-2">Ações de Conta & Dados</h4>
                   
-                  <button 
-                    onClick={handleSyncToCloud}
-                    disabled={syncing || !allData}
-                    className="flex-1 min-w-[140px] p-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-500 rounded-xl transition-all flex items-center justify-center gap-2 group disabled:opacity-50"
-                  >
-                    {syncing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Cloud className="w-5 h-5 group-hover:scale-110 transition-transform" />}
-                    <span className="text-sm font-bold">Sincronizar Nuvem</span>
-                  </button>
-
-                  <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex-1 min-w-[200px] p-3 bg-[var(--color-accent-teal)]/10 hover:bg-[var(--color-accent-teal)]/20 border border-[var(--color-accent-teal)]/30 text-[var(--color-accent-teal)] rounded-xl transition-all flex items-center justify-center gap-2 group"
-                  >
-                    <Upload className="w-5 h-5 group-hover:-translate-y-0.5 transition-transform" />
-                    <span className="text-sm font-bold">Importar Relatório B3 (CSV)</span>
-                  </button>
-
-                  <button 
-                    onClick={handleLogout}
-                    className="flex-1 min-w-[140px] p-3 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 rounded-xl transition-all flex items-center justify-center gap-2 group"
-                  >
-                    <LogOut className="w-5 h-5 group-hover:translate-x-0.5 transition-transform" />
-                    <span className="text-sm font-bold">Sair da Conta</span>
-                  </button>
-
-                  <button 
-                    onClick={handleClearLocalCache}
-                    className="flex-1 min-w-[200px] p-3 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-500 rounded-xl transition-all flex items-center justify-center gap-2 group"
-                    title="Se o app estiver lento ou não estiver salvando, limpe o cache"
-                  >
-                    <Zap className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                    <div className="flex flex-col items-start translate-y-[-1px]">
-                      <span className="text-sm font-bold leading-tight">Limpar Cache Local</span>
-                      <span className="text-[10px] opacity-70">Uso: {memoryUsage} / 5MB</span>
+                  <div className="flex flex-col gap-4">
+                    {/* Sincronizar Nuvem */}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                      <button 
+                        onClick={handleSyncToCloud}
+                        disabled={syncing || !allData}
+                        className="w-full sm:w-[260px] p-3 text-left bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-500 rounded-xl transition-all flex items-center justify-start gap-3 group disabled:opacity-50"
+                      >
+                        {syncing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Cloud className="w-5 h-5 group-hover:scale-110 transition-transform" />}
+                        <span className="text-sm font-bold">Sincronizar Nuvem</span>
+                      </button>
+                      <p className="text-sm text-white font-medium flex-1">
+                        Use para forçar o envio de lançamentos da nuvem para o Google Sheets (útil se a sincronização automática falhar).
+                      </p>
                     </div>
-                  </button>
 
-                  <button 
-                    onClick={handleLoadPublicFile}
-                    className="flex-1 min-w-[200px] p-3 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 rounded-xl transition-all flex items-center justify-center gap-2 group shadow-[inset_0_0_10px_rgba(99,102,241,0.1)]"
-                    title="Carregar arquivo CSV que você colocou na pasta pública"
-                  >
-                    <FileSearch className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                    <span className="text-sm font-bold">Importar do Servidor (Pasta Pública)</span>
-                  </button>
+                    {/* Importar Relatório */}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                      <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="w-full sm:w-[260px] p-3 text-left bg-[var(--color-accent-teal)]/10 hover:bg-[var(--color-accent-teal)]/20 border border-[var(--color-accent-teal)]/30 text-[var(--color-accent-teal)] rounded-xl transition-all flex items-center justify-start gap-3 group"
+                      >
+                        <Upload className="w-5 h-5 group-hover:-translate-y-0.5 transition-transform shrink-0" />
+                        <span className="text-sm font-bold">Importar Relatório B3</span>
+                      </button>
+                      <p className="text-sm text-white font-medium flex-1">
+                        Use para carregar uma nova planilha consolidada de negociações da B3 em formato CSV para o sistema.
+                      </p>
+                    </div>
 
-                  <button 
-                    onClick={handleResetData}
-                    className="flex-1 min-w-[200px] p-3 bg-rose-900/20 hover:bg-rose-900/30 border border-rose-500/30 text-rose-400 rounded-xl transition-all flex items-center justify-center gap-2 group shadow-[inset_0_0_10px_rgba(244,63,94,0.1)]"
-                    title="Apagar dados locais e recarregar aplicativo"
-                  >
-                    <Trash2 className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                    <span className="text-sm font-bold">Limpar Banco de Dados Local</span>
-                  </button>
+                    {/* Importar do Servidor */}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                      <button 
+                        onClick={handleLoadPublicFile}
+                        className="w-full sm:w-[260px] p-3 text-left bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 rounded-xl transition-all flex items-center justify-start gap-3 group shadow-[inset_0_0_10px_rgba(99,102,241,0.1)]"
+                      >
+                        <FileSearch className="w-5 h-5 group-hover:scale-110 transition-transform shrink-0" />
+                        <span className="text-sm font-bold truncate">Importar do Servidor</span>
+                      </button>
+                      <p className="text-sm text-white font-medium flex-1">
+                        Use para carregar um arquivo fixo de planilha pré-hospedado na pasta pública do servidor.
+                      </p>
+                    </div>
+
+                    {/* Limpar Cache Local */}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                      <button 
+                        onClick={handleClearLocalCache}
+                        className="w-full sm:w-[260px] p-3 text-left bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-500 rounded-xl transition-all flex items-center justify-start gap-3 group"
+                      >
+                        <Zap className="w-5 h-5 group-hover:scale-110 transition-transform shrink-0" />
+                        <div className="flex flex-col items-start translate-y-[-1px]">
+                          <span className="text-sm font-bold leading-tight">Limpar Cache Local</span>
+                          <span className="text-[10px] opacity-70">Uso: {memoryUsage} / 5MB</span>
+                        </div>
+                      </button>
+                      <p className="text-sm text-white font-medium flex-1">
+                        Use quando o app estiver apresentando lentidão. Apaga apenas arquivos temporários do seu navegador.
+                      </p>
+                    </div>
+
+                    {/* Limpar Banco de Dados Local */}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                      <button 
+                        onClick={handleResetData}
+                        className="w-full sm:w-[260px] p-3 text-left bg-rose-900/20 hover:bg-rose-900/30 border border-rose-500/30 text-rose-400 rounded-xl transition-all flex items-center justify-start gap-3 group shadow-[inset_0_0_10px_rgba(244,63,94,0.1)]"
+                      >
+                        <Trash2 className="w-5 h-5 group-hover:scale-110 transition-transform shrink-0" />
+                        <span className="text-sm font-bold truncate">Limpar Banco de Dados</span>
+                      </button>
+                      <p className="text-sm text-white font-medium flex-1">
+                        Use para remover todos os dados que estão em cache na tela atual (não apaga registros na nuvem).
+                      </p>
+                    </div>
+
+                    {/* Sair da Conta */}
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                      <button 
+                        onClick={handleLogout}
+                        className="w-full sm:w-[260px] p-3 text-left bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 rounded-xl transition-all flex items-center justify-start gap-3 group"
+                      >
+                        <LogOut className="w-5 h-5 group-hover:translate-x-0.5 transition-transform shrink-0" />
+                        <span className="text-sm font-bold">Sair da Conta</span>
+                      </button>
+                      <p className="text-sm text-white font-medium flex-1">
+                        Use para encerrar sua sessão atual de forma segura do sistema.
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </motion.div>
@@ -2651,23 +2780,36 @@ export default function App() {
                         const info = swingTradeData[ticker];
                         
                         const renderPerf = (perf: any) => {
-                          if (!info) return <span className="text-slate-500 italic">-</span>;
+                          if (!info) return <span className="text-white italic">-</span>;
+                          
                           if (typeof perf === 'number') {
                             return (
-                              <span className={perf >= 0 ? "text-emerald-400" : "text-rose-400"}>
-                                {perf >= 0 ? '+' : ''}{(perf * 100).toFixed(2)}%
+                              <span className={perf > 0 ? "text-emerald-400" : perf < 0 ? "text-rose-400" : "text-white"}>
+                                {perf > 0 ? '+' : ''}{(perf * 100).toFixed(2)}%
                               </span>
                             );
                           }
-                          return <span className="text-slate-500 uppercase text-[10px]">{perf}</span>;
+
+                          if (typeof perf === 'string' && perf !== "-") {
+                            const num = parseFloat(perf.replace('%', ''));
+                            if (!isNaN(num)) {
+                              return (
+                                <span className={num > 0 ? "text-emerald-400" : num < 0 ? "text-rose-400" : "text-white"}>
+                                  {num > 0 ? '+' : ''}{perf}
+                                </span>
+                              );
+                            }
+                          }
+                          
+                          return <span className="text-white uppercase text-[10px]">{perf}</span>;
                         };
 
                         return (
                           <tr key={ticker} className="hover:bg-white/5 transition-colors group">
-                            <td className="p-4 text-white font-bold">{ticker}</td>
-                            <td className="p-4 text-slate-300">
+                            <td className="p-4 font-bold text-[#545759]">{ticker}</td>
+                            <td className="p-4 text-white">
                               {isFetchingSwing && !info ? (
-                                <div className="flex items-center gap-2 text-slate-500 italic">
+                                <div className="flex items-center gap-2 text-white italic">
                                   <Loader2 className="w-3 h-3 animate-spin" />
                                   Buscando...
                                 </div>
@@ -2676,9 +2818,9 @@ export default function App() {
                                   R$ {info.currentPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               ) : info && info.currentPrice === 0 ? (
-                                <span className="text-rose-500/70 font-bold uppercase text-[10px]">NOT FOUND</span>
+                                <span className="text-rose-500 font-bold uppercase text-[10px]">NOT FOUND</span>
                               ) : (
-                                <span className="text-slate-500 italic">Aguardando atualização...</span>
+                                <span className="text-white italic">Aguardando atualização...</span>
                               )}
                             </td>
                             <td className="p-4 font-medium">{renderPerf(info?.perfWeek)}</td>
@@ -2689,7 +2831,7 @@ export default function App() {
                         );
                       }) : (
                         <tr>
-                          <td colSpan={6} className="p-12 text-center text-slate-500 italic">
+                          <td colSpan={6} className="p-12 text-center text-white italic">
                             Nenhum ativo encontrado no histórico para monitorar.
                           </td>
                         </tr>
@@ -2807,7 +2949,7 @@ export default function App() {
                             type="text" 
                             inputMode="decimal"
                             value={formYields}
-                            onChange={(e) => setFormYields(e.target.value)}
+                            onChange={handleCurrencyChange(setFormYields)}
                             placeholder="R$ 0,00" 
                             className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)] outline-none" 
                           />
@@ -2818,7 +2960,7 @@ export default function App() {
                             type="text" 
                             inputMode="decimal"
                             value={formIr}
-                            onChange={(e) => setFormIr(e.target.value)}
+                            onChange={handleCurrencyChange(setFormIr)}
                             placeholder="R$ 0,00" 
                             className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)] outline-none" 
                           />
@@ -2859,7 +3001,7 @@ export default function App() {
                             type="text" 
                             inputMode="decimal"
                             value={formPrecoUn}
-                            onChange={(e) => setFormPrecoUn(e.target.value)}
+                            onChange={handleCurrencyChange(setFormPrecoUn)}
                             placeholder="R$ 0,00" 
                             className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
                           />
@@ -2868,8 +3010,8 @@ export default function App() {
                           <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Total do Custo</label>
                           <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 justify-center flex items-center text-[#2dd4bf] font-bold pointer-events-none w-full min-h-[46px]">
                             R$ {(
-                                (parseFloat(formUn) || 0) * 
-                                (parseFloat(formPrecoUn.replace(',', '.')) || 0)
+                                (parseFormattedNumber(formUn)) * 
+                                (parseFormattedNumber(formPrecoUn))
                               ).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
                         </div>

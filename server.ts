@@ -30,7 +30,10 @@ app.post("/api/finance/quote", async (req, res) => {
   const brapiToken = process.env.BRAPI_TOKEN || "";
 
   const fetchAsset = async (ticker: string) => {
-    const cleanTicker = ticker.trim().toUpperCase().replace(".SA", "");
+    let cleanTicker = ticker.trim().toUpperCase().replace(".SA", "");
+    if (cleanTicker.startsWith("BVMF:")) {
+      cleanTicker = cleanTicker.substring(5);
+    }
     const isBrazilian = /^[A-Z]{4}[0-9]{1,2}$/.test(cleanTicker) || cleanTicker === "BOVA11" || cleanTicker === "SMAL11";
     const signal = AbortSignal.timeout(8000);
 
@@ -70,9 +73,67 @@ app.post("/api/finance/quote", async (req, res) => {
       }
       
       // Fallback ou padrão internacional
-      const quote = await yahooFinance.quote(`${cleanTicker}.SA` || cleanTicker);
+      let quote;
+      try {
+        // Tenta com .SA se parecer brasileiro mas falhou no Brapi
+        if (isBrazilian) {
+          quote = await yahooFinance.quote(`${cleanTicker}.SA`);
+        } else if (cleanTicker.endsWith("BRL")) {
+          // Especial para pares BRL que o Yahoo costuma chamar de TICKER-BRL ou TICKERBRL=X
+          const baseToken = cleanTicker.replace("BRL", "");
+          try {
+             quote = await yahooFinance.quote(`${baseToken}-BRL`);
+          } catch {
+             quote = await yahooFinance.quote(`${cleanTicker}=X`);
+          }
+        } else {
+          quote = await yahooFinance.quote(cleanTicker);
+        }
+      } catch (e) {
+        // Se falhou com .SA, tenta sem
+        try {
+          quote = await yahooFinance.quote(cleanTicker);
+        } catch (e2) {
+          return null;
+        }
+      }
+
       if (!quote) return null;
-      return { price: quote.regularMarketPrice || quote.price, variWeek: 0, variMonth: 0, vari12Month: 0 };
+
+      let varWeek = 0; let varMonth = 0; let var12m = 0;
+      const currPrice = quote.regularMarketPrice || quote.price;
+
+      // Buscar histórico pelo Yahoo Finance
+      try {
+        const queryOpts = {
+          period1: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)
+        };
+        let histTicker = cleanTicker;
+        if (isBrazilian && !histTicker.endsWith(".SA")) histTicker += ".SA";
+        else if (quote.symbol) histTicker = quote.symbol;
+
+        const hist = await yahooFinance.historical(histTicker, queryOpts);
+        if (hist && hist.length > 0) {
+          const now = Date.now();
+          const getPriceFrom = (days: number) => {
+             const target = now - (days * 24 * 60 * 60 * 1000);
+             return hist.reduce((prev: any, curr: any) => 
+                Math.abs(curr.date.getTime() - target) < Math.abs(prev.date.getTime() - target) ? curr : prev
+             ).close;
+          };
+          const week = getPriceFrom(7);
+          const month = getPriceFrom(30);
+          const year = hist[0].close; // 1 year ago (start of period1)
+
+          if (week) varWeek = ((currPrice - week) / week) * 100;
+          if (month) varMonth = ((currPrice - month) / month) * 100;
+          if (year) var12m = ((currPrice - year) / year) * 100;
+        }
+      } catch (histError) {
+        console.error(`Status de histórico detalhado não alcançado para ${cleanTicker}`);
+      }
+
+      return { price: currPrice, variWeek: varWeek, variMonth: varMonth, vari12Month: var12m };
     } catch (e) {
       console.error(`Error fetching ${ticker}:`, e);
       return null;
@@ -182,6 +243,7 @@ app.post("/api/sheets/append", async (req, res) => {
       spreadsheetId,
       range: "A1",
       valueInputOption: "USER_ENTERED",
+      insertDataOption: "INSERT_ROWS",
       requestBody: {
         values: [rowData]
       }
@@ -192,6 +254,109 @@ app.post("/api/sheets/append", async (req, res) => {
     console.error("Error appending to sheet:", error);
     res.status(500).json({ 
       error: "Erro ao escrever na planilha.", 
+      details: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.post("/api/sheets/delete", async (req, res) => {
+  const { tokens, spreadsheetId, rowData } = req.body;
+  
+  if (!tokens || !spreadsheetId || !rowData) {
+    return res.status(400).json({ error: "Parâmetros ausentes." });
+  }
+
+  const auth = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+  auth.setCredentials(tokens);
+
+  const sheets = google.sheets({ version: "v4", auth });
+  
+  try {
+    // 1. Fetch sheet values
+    const response = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: "A:Z",
+    });
+    
+    const rows = response.data.values;
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: "Planilha vazia." });
+    }
+
+    // Standard columns based on the exact user format
+    const dIdx = 3;  // Data
+    const tIdx = 4;  // Ticker
+    const transIdx = 5; // Transação
+    const uIdx = 7;  // UN
+    const typeIdx = 19; // Tipo Atividade
+
+    const cleanNum = (str: any) => String(str || "").replace(/[^\d]/g, "");
+    const cleanStr = (str: any) => String(str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
+
+    let rowIndexToDelete = -1;
+    console.log(`🗑️ Attempting to delete from sheet: Ticker=${rowData.Ticker}, Transact=${rowData.Transação}, UN=${rowData.UN}, Data=${rowData.Data}`);
+    
+    for (let i = rows.length - 1; i >= 1; i--) {
+        const r = rows[i];
+        if (!r[tIdx]) continue;
+        
+        const isTickerMatch = cleanStr(r[tIdx]) === cleanStr(rowData.Ticker);
+        
+        const transactValue = rowData.Transação || rowData.Transacao || "";
+        const isTransMatch = cleanStr(r[transIdx]) === cleanStr(transactValue);
+        
+        const rUnNum = cleanNum(r[uIdx]);
+        const rowUnNum = cleanNum(rowData.UN);
+        const isUnMatch = rUnNum === rowUnNum || (rUnNum === "" && rowUnNum === "");
+        
+        // Match Date
+        const rDate = String(r[dIdx] || "").trim();
+        const rowDate = String(rowData.Data || "").trim();
+        const isDateMatch = rDate === rowDate;
+
+        if (isTickerMatch && isTransMatch && isUnMatch && isDateMatch) {
+            console.log(`✅ Found exact match at row ${i} (1-based: ${i + 1}). Row Data: ${JSON.stringify(r)}`);
+            rowIndexToDelete = i;
+            break;
+        }
+    }
+
+    if (rowIndexToDelete === -1) {
+        console.log(`❌ No matching row found in Sheets to delete.`);
+        return res.status(404).json({ error: "Registro não encontrado na planilha." });
+    }
+
+    // Get spreadsheet info to get the sheetId of the first sheet
+    const spreadsheetInfo = await sheets.spreadsheets.get({ spreadsheetId });
+    const sheetId = spreadsheetInfo.data.sheets?.[0]?.properties?.sheetId || 0;
+
+    // 2. Delete the row using batchUpdate
+    await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+            requests: [
+                {
+                    deleteDimension: {
+                        range: {
+                            sheetId: sheetId,
+                            dimension: "ROWS",
+                            startIndex: rowIndexToDelete,      // inclusive (0-based)
+                            endIndex: rowIndexToDelete + 1    // exclusive
+                        }
+                    }
+                }
+            ]
+        }
+    });
+
+    res.json({ success: true, deletedRow: rowIndexToDelete + 1 });
+  } catch (error) {
+    console.error("Error deleting from sheet:", error);
+    res.status(500).json({ 
+      error: "Erro ao excluir da planilha.", 
       details: error instanceof Error ? error.message : String(error)
     });
   }
