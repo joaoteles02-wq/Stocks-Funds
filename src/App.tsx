@@ -41,6 +41,7 @@ import {
   ComposedChart,
   Bar,
   Line,
+  LineChart,
   YAxis,
   Legend,
   LabelList
@@ -199,7 +200,8 @@ export default function App() {
     perfWeek: number | string,
     perfMonth: number | string,
     perfYear: number | string,
-    perfYTD: number | string
+    perfYTD: number | string,
+    ytdHistory?: number[]
   }>>({});
   const [isFetchingSwing, setIsFetchingSwing] = useState(false);
   const [hasAttemptedSwingFetch, setHasAttemptedSwingFetch] = useState(false);
@@ -214,6 +216,33 @@ export default function App() {
   const [filterTipoAtividade, setFilterTipoAtividade] = useState<string>("All");
   const [pieViewMode, setPieViewMode] = useState<'Ticker' | 'Tipo Atividade' | 'Banco/Corretora'>('Ticker');
   const [selectedYieldYear, setSelectedYieldYear] = useState<string>(currentYear);
+
+  const [dashboardSparkline, setDashboardSparkline] = useState<{ ticker: string, history: { index: number, price: number }[] }>({ ticker: 'All', history: [] });
+
+  useEffect(() => {
+    if (filterTicker === 'All') {
+      setDashboardSparkline({ ticker: 'All', history: [] });
+      return;
+    }
+
+    const abort = new AbortController();
+    fetch('/api/finance/quote', {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({ tickers: [filterTicker] }),
+       signal: abort.signal
+    }).then(res => res.json()).then(data => {
+       const q = data.quotes?.[filterTicker];
+       if (q && q.ytdHistory) {
+         setDashboardSparkline({ 
+           ticker: filterTicker, 
+           history: q.ytdHistory.map((h: number, i: number) => ({ index: i, price: h }))
+         });
+       }
+    }).catch(e => console.error("Error fetching sparkline", e));
+    
+    return () => abort.abort();
+  }, [filterTicker]);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isUploadingRef = useRef(false);
@@ -411,7 +440,8 @@ export default function App() {
             perfWeek: quoteInfo.variWeek != null ? `${quoteInfo.variWeek.toFixed(2)}%` : "-",
             perfMonth: quoteInfo.variMonth != null ? `${quoteInfo.variMonth.toFixed(2)}%` : "-",
             perfYear: quoteInfo.vari12Month != null ? `${quoteInfo.vari12Month.toFixed(2)}%` : "-",
-            perfYTD: quoteInfo.variYTD != null ? `${quoteInfo.variYTD.toFixed(2)}%` : "-"
+            perfYTD: quoteInfo.variYTD != null ? `${quoteInfo.variYTD.toFixed(2)}%` : "-",
+            ytdHistory: quoteInfo.ytdHistory || []
           };
         } else {
           updatedData[t] = {
@@ -682,11 +712,13 @@ export default function App() {
         }));
         
         setAllData(prev => {
-          // Fallback: se 'prev' for vazio, tentamos recuperar do localStorage 
-          // para garantir que o merge aconteça mesmo se o estado foi resetado
-          let currentLocal = prev ? prev.filter(r => !r.id) : [];
+          // Mantém apenas os dados locais inseridos nesta sessão atual via Planilha
+          // (aqueles que não têm id) e que NÃO vieram do CSV em cache da inicialização.
+          let currentLocal = prev ? prev.filter(r => !r.id && !r._isLocalCsv) : [];
           
-          if (currentLocal.length === 0) {
+          // Se não houver dados na nuvem, aí sim podemos tentar buscar o CSV salvo
+          // localmente para fins de preview offline
+          if (cloudData.length === 0 && currentLocal.length === 0) {
             const saved = localStorage.getItem('saved_csv_data');
             if (saved) {
               const results = Papa.parse(saved, {
@@ -695,8 +727,16 @@ export default function App() {
                 transformHeader: normalizeHeader,
                 transform: (value) => value.trim(),
               });
-              currentLocal = results.data || [];
+              currentLocal = (results.data || []).map((row: any) => ({ ...row, _isLocalCsv: true }));
             }
+          } else if (cloudData.length > 0) {
+            // Se já temos os dados centralizados no Firebase, as instâncias locais
+            // de saved_csv_data de outros dispositivos não devem ressuscitar registros deletados.
+            // Continuamos apenas aceitando dados recém importados das Sheets que ainda não
+            // tenham id, mas ignoramos o CSV armazenado em disco.
+            
+            // Note: handleFileUpload now clears currentLocal by calling setAllData, but
+            // for sheets we just keep the prev currentLocal.
           }
 
           const combined = [...cloudData, ...currentLocal];
@@ -732,7 +772,8 @@ export default function App() {
         transform: (value) => value.trim(),
         complete: (results) => {
           setTableColumns(results.meta.fields || []);
-          processData(results.data as any[]);
+          const markedData = (results.data as any[]).map(row => ({ ...row, _isLocalCsv: true }));
+          processData(markedData);
           checkMemoryUsage();
         },
       });
@@ -887,23 +928,23 @@ export default function App() {
       : spreadsheetId.trim();
 
     const rowDataArr = new Array(24).fill("");
-    rowDataArr[3] = record["Data"] || "";
-    rowDataArr[4] = record["Ticker"] || "";
+    rowDataArr[3] = record["Data"] ?? "";
+    rowDataArr[4] = record["Ticker"] ?? "";
     rowDataArr[5] = String(record["Transação"] || "").toUpperCase();
-    rowDataArr[6] = record["Yields"] || "";
-    rowDataArr[7] = record["UN"] || "";
-    rowDataArr[8] = record["Saldo de Un"] || "";
-    rowDataArr[9] = record["Preço Un de Custo"] || "";
-    rowDataArr[10] = record["Total do Custo"] || "";
-    rowDataArr[11] = record["Saldo do Custo"] || "";
-    rowDataArr[12] = record["Preço Médio"] || "";
-    rowDataArr[13] = record["B3 Preço Un"] || "";
-    rowDataArr[14] = record["B3 Preço total"] || "";
-    rowDataArr[19] = record["Tipo Atividade"] || "";
-    rowDataArr[20] = record["Banco/Corretora"] || "";
-    rowDataArr[21] = record["CNPJ"] || "";
-    rowDataArr[22] = record["IR"] || "";
-    rowDataArr[23] = record["Dollar"] || "";
+    rowDataArr[6] = record["Yields"] ?? "";
+    rowDataArr[7] = record["UN"] ?? "";
+    rowDataArr[8] = record["Saldo de Un"] ?? "";
+    rowDataArr[9] = record["Preço Un de Custo"] ?? "";
+    rowDataArr[10] = record["Total do Custo"] ?? "";
+    rowDataArr[11] = record["Saldo do Custo"] ?? record["Saldo Custo"] ?? "";
+    rowDataArr[12] = record["Preço Médio"] ?? "";
+    rowDataArr[13] = record["B3 Preço Un"] ?? "";
+    rowDataArr[14] = record["B3 Preço total"] ?? "";
+    rowDataArr[19] = record["Tipo Atividade"] ?? "";
+    rowDataArr[20] = record["Banco/Corretora"] ?? "";
+    rowDataArr[21] = record["CNPJ"] ?? "";
+    rowDataArr[22] = record["IR"] ?? "";
+    rowDataArr[23] = record["Dollar"] ?? "";
 
     try {
       const resp = await fetch('/api/sheets/append', {
@@ -2422,6 +2463,43 @@ export default function App() {
                       {computedPatrimonioVarYtd === null ? "---" : `${computedPatrimonioVarYtd >= 0 ? "+" : ""}${computedPatrimonioVarYtd.toFixed(2)}%`}
                     </h2>
                   </div>
+                </div>
+              </div>
+
+              {/* Sparkline YTD Dashboard */}
+              <div className="glass-panel p-5 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-3 w-full border border-[var(--color-accent-teal)]/20 bg-[var(--color-accent-teal)]/5">
+                <h3 className="font-bold text-[var(--color-accent-teal)] flex items-center gap-2">
+                  <Activity className="w-5 h-5" />
+                  Sparkline YTD ({dashboardSparkline.ticker === 'All' ? 'Selecione um Ticker no filtro' : dashboardSparkline.ticker})
+                </h3>
+
+                <div className="bg-black/40 p-3 rounded-xl border border-white/5 relative h-24 mt-2">
+                  {dashboardSparkline.ticker !== 'All' && dashboardSparkline.history.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={dashboardSparkline.history}>
+                        <defs>
+                          <linearGradient id="sparklineColorValue" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="var(--color-accent-teal)" stopOpacity={0.4}/>
+                            <stop offset="95%" stopColor="var(--color-accent-teal)" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <YAxis domain={['auto', 'auto']} hide />
+                        <Area 
+                          type="monotone" 
+                          dataKey="price" 
+                          stroke="var(--color-accent-teal)" 
+                          strokeWidth={2}
+                          fillOpacity={1} 
+                          fill="url(#sparklineColorValue)" 
+                          isAnimationActive={false}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-500 text-sm">
+                      {dashboardSparkline.ticker === 'All' ? 'Use o filtro de Ticker acima para ver o gráfico YTD' : 'Sem dados para o período'}
+                    </div>
+                  )}
                 </div>
               </div>
 

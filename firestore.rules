@@ -43,7 +43,7 @@ service cloud.firestore {
                     && isValidInvestment(request.resource.data)
                     && request.resource.data.userId == request.auth.uid;
 
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && (resource == null || !('userId' in resource.data) || resource.data.userId == request.auth.uid);
     }
 
     match /users/{userId}/config/sheets {

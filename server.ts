@@ -58,10 +58,15 @@ app.post("/api/finance/quote", async (req, res) => {
               const currPrice = result.regularMarketPrice;
               const history = result.historicalDataPrice;
 
+              let sparkline: number[] = [];
               if (history && history.length > 0) {
                 const now = Date.now() / 1000;
-                const targetYtd = new Date(new Date().getFullYear(), 0, 1).getTime() / 1000;
+                const targetYtd = Math.floor(new Date(new Date().getFullYear(), 0, 1).getTime() / 1000);
                 
+                sparkline = history
+                  .filter((h: any) => h.date >= targetYtd && typeof h.close === 'number')
+                  .map((h: any) => h.close);
+
                 const getPriceFromTarget = (target: number) => {
                   return history.reduce((prev: any, curr: any) => 
                      Math.abs(curr.date - target) < Math.abs(prev.date - target) ? curr : prev
@@ -78,7 +83,7 @@ app.post("/api/finance/quote", async (req, res) => {
                 if (year) var12m = ((currPrice - year) / year) * 100;
                 if (ytdPrice) varYTD = ((currPrice - ytdPrice) / ytdPrice) * 100;
               }
-              return { price: currPrice, variWeek: varWeek, variMonth: varMonth, vari12Month: var12m, variYTD: varYTD };
+              return { price: currPrice, variWeek: varWeek, variMonth: varMonth, vari12Month: var12m, variYTD: varYTD, ytdHistory: sparkline };
            }
         }
       }
@@ -112,6 +117,7 @@ app.post("/api/finance/quote", async (req, res) => {
       if (!quote) return null;
 
       let varWeek = 0; let varMonth = 0; let var12m = 0; let varYTD = 0;
+      let sparkline: number[] = [];
       const currPrice = quote.regularMarketPrice || quote.price;
 
       // Buscar histórico pelo Yahoo Finance
@@ -130,6 +136,13 @@ app.post("/api/finance/quote", async (req, res) => {
           const now = Date.now();
           const targetYtd = new Date(new Date().getFullYear(), 0, 1).getTime();
           
+          sparkline = hist
+            .filter((h: any) => {
+               const time = h.date ? new Date(h.date).getTime() : 0;
+               return time >= targetYtd && typeof h.close === 'number';
+            })
+            .map((h: any) => h.close);
+
           const getPriceFromTarget = (target: number) => {
              return hist.reduce((prev: any, curr: any) => {
                 const prevTime = prev.date ? new Date(prev.date).getTime() : 0;
@@ -152,7 +165,7 @@ app.post("/api/finance/quote", async (req, res) => {
         console.error(`Status de histórico detalhado não alcançado para ${cleanTicker}`, histError);
       }
 
-      return { price: currPrice, variWeek: varWeek, variMonth: varMonth, vari12Month: var12m, variYTD: varYTD };
+      return { price: currPrice, variWeek: varWeek, variMonth: varMonth, vari12Month: var12m, variYTD: varYTD, ytdHistory: sparkline };
     } catch (e) {
       console.error(`Error fetching ${ticker}:`, e);
       return null;
