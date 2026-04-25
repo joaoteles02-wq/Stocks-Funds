@@ -35,6 +35,13 @@ app.post("/api/finance/quote", async (req, res) => {
       cleanTicker = cleanTicker.substring(5);
     }
     const isBrazilian = /^[A-Z]{4}[0-9]{1,2}$/.test(cleanTicker) || cleanTicker === "BOVA11" || cleanTicker === "SMAL11";
+    const cryptoSet = new Set(["BTC", "ETH", "USDT", "BNB", "SOL", "USDC", "XRP", "ADA", "DOGE", "AVAX", "DOT", "LINK", "MATIC", "SHIB", "UNI", "LTC", "BITCOIN"]);
+    
+    // Automatically convert pure crypto tickers to USD pair for Yahoo Finance
+    if (cryptoSet.has(cleanTicker) || cleanTicker === "BITCOIN") {
+      cleanTicker = cleanTicker === "BITCOIN" ? "BTC-USD" : `${cleanTicker}-USD`;
+    }
+
     const signal = AbortSignal.timeout(8000);
 
     try {
@@ -47,29 +54,33 @@ app.post("/api/finance/quote", async (req, res) => {
            const data = await res.json();
            const result = data.results?.[0];
            if (result) {
-              let varWeek = 0; let varMonth = 0; let var12m = 0;
+              let varWeek = 0; let varMonth = 0; let var12m = 0; let varYTD = 0;
               const currPrice = result.regularMarketPrice;
               const history = result.historicalDataPrice;
 
               if (history && history.length > 0) {
                 const now = Date.now() / 1000;
-                const getPriceFrom = (days: number) => {
-                  const target = now - (days * 24 * 60 * 60);
+                const targetYtd = new Date(new Date().getFullYear(), 0, 1).getTime() / 1000;
+                
+                const getPriceFromTarget = (target: number) => {
                   return history.reduce((prev: any, curr: any) => 
                      Math.abs(curr.date - target) < Math.abs(prev.date - target) ? curr : prev
                   ).close;
                 };
-                const week = getPriceFrom(7);
-                const month = getPriceFrom(30);
+                
+                const week = getPriceFromTarget(now - 7 * 24 * 60 * 60);
+                const month = getPriceFromTarget(now - 30 * 24 * 60 * 60);
                 const year = history[0].close;
+                const ytdPrice = getPriceFromTarget(targetYtd);
+                
                 if (week) varWeek = ((currPrice - week) / week) * 100;
                 if (month) varMonth = ((currPrice - month) / month) * 100;
                 if (year) var12m = ((currPrice - year) / year) * 100;
+                if (ytdPrice) varYTD = ((currPrice - ytdPrice) / ytdPrice) * 100;
               }
-              return { price: currPrice, variWeek: varWeek, variMonth: varMonth, vari12Month: var12m };
+              return { price: currPrice, variWeek: varWeek, variMonth: varMonth, vari12Month: var12m, variYTD: varYTD };
            }
         }
-        console.log(`[Debug] Brapi failed for ${cleanTicker}, falling back to Yahoo`);
       }
       
       // Fallback ou padrão internacional
@@ -100,40 +111,48 @@ app.post("/api/finance/quote", async (req, res) => {
 
       if (!quote) return null;
 
-      let varWeek = 0; let varMonth = 0; let var12m = 0;
+      let varWeek = 0; let varMonth = 0; let var12m = 0; let varYTD = 0;
       const currPrice = quote.regularMarketPrice || quote.price;
 
       // Buscar histórico pelo Yahoo Finance
       try {
+        const dateStr = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
         const queryOpts = {
-          period1: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)
+          period1: dateStr
         };
         let histTicker = cleanTicker;
         if (isBrazilian && !histTicker.endsWith(".SA")) histTicker += ".SA";
         else if (quote.symbol) histTicker = quote.symbol;
 
-        const hist = await yahooFinance.historical(histTicker, queryOpts);
+        const chartRes = await yahooFinance.chart(histTicker, queryOpts);
+        const hist = chartRes?.quotes || [];
         if (hist && hist.length > 0) {
           const now = Date.now();
-          const getPriceFrom = (days: number) => {
-             const target = now - (days * 24 * 60 * 60 * 1000);
-             return hist.reduce((prev: any, curr: any) => 
-                Math.abs(curr.date.getTime() - target) < Math.abs(prev.date.getTime() - target) ? curr : prev
-             ).close;
+          const targetYtd = new Date(new Date().getFullYear(), 0, 1).getTime();
+          
+          const getPriceFromTarget = (target: number) => {
+             return hist.reduce((prev: any, curr: any) => {
+                const prevTime = prev.date ? new Date(prev.date).getTime() : 0;
+                const currTime = curr.date ? new Date(curr.date).getTime() : 0;
+                return Math.abs(currTime - target) < Math.abs(prevTime - target) ? curr : prev;
+             }).close;
           };
-          const week = getPriceFrom(7);
-          const month = getPriceFrom(30);
+          
+          const week = getPriceFromTarget(now - 7 * 24 * 60 * 60 * 1000);
+          const month = getPriceFromTarget(now - 30 * 24 * 60 * 60 * 1000);
           const year = hist[0].close; // 1 year ago (start of period1)
+          const ytdPrice = getPriceFromTarget(targetYtd);
 
           if (week) varWeek = ((currPrice - week) / week) * 100;
           if (month) varMonth = ((currPrice - month) / month) * 100;
           if (year) var12m = ((currPrice - year) / year) * 100;
+          if (ytdPrice) varYTD = ((currPrice - ytdPrice) / ytdPrice) * 100;
         }
       } catch (histError) {
-        console.error(`Status de histórico detalhado não alcançado para ${cleanTicker}`);
+        console.error(`Status de histórico detalhado não alcançado para ${cleanTicker}`, histError);
       }
 
-      return { price: currPrice, variWeek: varWeek, variMonth: varMonth, vari12Month: var12m };
+      return { price: currPrice, variWeek: varWeek, variMonth: varMonth, vari12Month: var12m, variYTD: varYTD };
     } catch (e) {
       console.error(`Error fetching ${ticker}:`, e);
       return null;

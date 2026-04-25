@@ -411,7 +411,7 @@ export default function App() {
             perfWeek: quoteInfo.variWeek != null ? `${quoteInfo.variWeek.toFixed(2)}%` : "-",
             perfMonth: quoteInfo.variMonth != null ? `${quoteInfo.variMonth.toFixed(2)}%` : "-",
             perfYear: quoteInfo.vari12Month != null ? `${quoteInfo.vari12Month.toFixed(2)}%` : "-",
-            perfYTD: "-" // API não retorna YTD diretamente, mantendo como placeholder
+            perfYTD: quoteInfo.variYTD != null ? `${quoteInfo.variYTD.toFixed(2)}%` : "-"
           };
         } else {
           updatedData[t] = {
@@ -2767,7 +2767,7 @@ export default function App() {
                   <table className="w-full text-left text-sm whitespace-nowrap border-collapse min-w-max relative">
                     <thead className="sticky top-0 z-20 backdrop-blur-3xl bg-slate-900/60 shadow-[0_2px_10px_rgba(0,0,0,0.5)]">
                       <tr>
-                        <th className="p-4 font-semibold text-[var(--color-accent-cyan)] border-b border-white/10 uppercase tracking-wider">Ticker</th>
+                        <th className="p-4 font-semibold text-[var(--color-accent-cyan)] border-b border-white/10 uppercase tracking-wider text-[110%]">Ticker</th>
                         <th className="p-4 font-semibold text-[var(--color-accent-teal)] border-b border-white/10 uppercase tracking-wider">B3 Preço Un</th>
                         <th className="p-4 font-semibold text-[var(--color-accent-violet)] border-b border-white/10 uppercase tracking-wider">Semana</th>
                         <th className="p-4 font-semibold text-[var(--color-accent-violet)] border-b border-white/10 uppercase tracking-wider">Mês</th>
@@ -2806,7 +2806,7 @@ export default function App() {
 
                         return (
                           <tr key={ticker} className="hover:bg-white/5 transition-colors group">
-                            <td className="p-4 font-bold text-[#545759]">{ticker}</td>
+                            <td className="p-4 font-bold text-[#545759] text-[110%]">{ticker}</td>
                             <td className="p-4 text-white">
                               {isFetchingSwing && !info ? (
                                 <div className="flex items-center gap-2 text-white italic">
