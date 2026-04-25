@@ -58,14 +58,14 @@ app.post("/api/finance/quote", async (req, res) => {
               const currPrice = result.regularMarketPrice;
               const history = result.historicalDataPrice;
 
-              let sparkline: number[] = [];
+              let sparkline: any[] = [];
               if (history && history.length > 0) {
                 const now = Date.now() / 1000;
                 const targetYtd = Math.floor(new Date(new Date().getFullYear(), 0, 1).getTime() / 1000);
                 
                 sparkline = history
                   .filter((h: any) => h.date >= targetYtd && typeof h.close === 'number')
-                  .map((h: any) => h.close);
+                  .map((h: any) => ({ price: h.close, date: h.date * 1000 }));
 
                 const getPriceFromTarget = (target: number) => {
                   return history.reduce((prev: any, curr: any) => 
@@ -117,7 +117,7 @@ app.post("/api/finance/quote", async (req, res) => {
       if (!quote) return null;
 
       let varWeek = 0; let varMonth = 0; let var12m = 0; let varYTD = 0;
-      let sparkline: number[] = [];
+      let sparkline: any[] = [];
       const currPrice = quote.regularMarketPrice || quote.price;
 
       // Buscar histórico pelo Yahoo Finance
@@ -141,7 +141,7 @@ app.post("/api/finance/quote", async (req, res) => {
                const time = h.date ? new Date(h.date).getTime() : 0;
                return time >= targetYtd && typeof h.close === 'number';
             })
-            .map((h: any) => h.close);
+            .map((h: any) => ({ price: h.close, date: new Date(h.date).getTime() }));
 
           const getPriceFromTarget = (target: number) => {
              return hist.reduce((prev: any, curr: any) => {

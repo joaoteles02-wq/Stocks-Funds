@@ -201,7 +201,7 @@ export default function App() {
     perfMonth: number | string,
     perfYear: number | string,
     perfYTD: number | string,
-    ytdHistory?: number[]
+    ytdHistory?: any[]
   }>>({});
   const [isFetchingSwing, setIsFetchingSwing] = useState(false);
   const [hasAttemptedSwingFetch, setHasAttemptedSwingFetch] = useState(false);
@@ -217,7 +217,7 @@ export default function App() {
   const [pieViewMode, setPieViewMode] = useState<'Ticker' | 'Tipo Atividade' | 'Banco/Corretora'>('Ticker');
   const [selectedYieldYear, setSelectedYieldYear] = useState<string>(currentYear);
 
-  const [dashboardSparkline, setDashboardSparkline] = useState<{ ticker: string, history: { index: number, price: number }[] }>({ ticker: 'All', history: [] });
+  const [dashboardSparkline, setDashboardSparkline] = useState<{ ticker: string, history: { index: number, price: number, dateStr?: string }[] }>({ ticker: 'All', history: [] });
 
   useEffect(() => {
     if (filterTicker === 'All') {
@@ -236,7 +236,10 @@ export default function App() {
        if (q && q.ytdHistory) {
          setDashboardSparkline({ 
            ticker: filterTicker, 
-           history: q.ytdHistory.map((h: number, i: number) => ({ index: i, price: h }))
+           history: q.ytdHistory.map((h: any, i: number) => {
+             const d = new Date(h.date);
+             return { index: i, price: h.price, dateStr: d.toLocaleDateString('pt-BR') };
+           })
          });
        }
     }).catch(e => console.error("Error fetching sparkline", e));
@@ -2473,7 +2476,7 @@ export default function App() {
                   Sparkline YTD ({dashboardSparkline.ticker === 'All' ? 'Selecione um Ticker no filtro' : dashboardSparkline.ticker})
                 </h3>
 
-                <div className="bg-black/40 p-3 rounded-xl border border-white/5 relative h-24 mt-2">
+                <div className="bg-black/40 p-3 w-full min-w-0 rounded-xl border border-white/5 relative h-[150px] mt-2">
                   {dashboardSparkline.ticker !== 'All' && dashboardSparkline.history.length > 0 ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <AreaChart data={dashboardSparkline.history}>
@@ -2483,7 +2486,21 @@ export default function App() {
                             <stop offset="95%" stopColor="var(--color-accent-teal)" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
+                        <XAxis dataKey="dateStr" hide />
                         <YAxis domain={['auto', 'auto']} hide />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'rgba(13, 27, 42, 0.8)', 
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '12px',
+                            backdropFilter: 'blur(8px)',
+                            color: '#fff'
+                          }} 
+                          itemStyle={{ color: '#fff' }}
+                          labelStyle={{ color: '#aaa', marginBottom: '4px' }}
+                          formatter={(value: number) => [`R$ ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}`, 'Preço']}
+                          labelFormatter={(label: any) => label ? `Data: ${label}` : ''}
+                        />
                         <Area 
                           type="monotone" 
                           dataKey="price" 
