@@ -1571,7 +1571,7 @@ export default function App() {
     
     allData.forEach(r => {
         const t = String(r["Ticker"]).trim().toUpperCase();
-        if (!t || t === "" || t === "MONTH CLOSING" || t === "TOTAL") return;
+        if (!t || t === "" || t === "MONTH CLOSING" || t === "TOTAL" || t === "ENBR3") return;
         
         validTickers.add(t);
 
@@ -2502,6 +2502,61 @@ export default function App() {
                     className="flex flex-col gap-8"
                   >
 
+              {/* Sparkline YTD Dashboard (Moved above summary cards) */}
+              <div className="glass-panel p-5 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-3 w-full border border-[var(--color-accent-teal)]/20 bg-[var(--color-accent-teal)]/5">
+                <h3 className="font-bold text-[var(--color-accent-teal)] flex items-center gap-2">
+                  <Activity className="w-5 h-5" />
+                  Sparkline YTD ({dashboardSparkline.ticker === 'All' ? 'Selecione um Ticker no filtro' : dashboardSparkline.ticker})
+                </h3>
+
+                <div className="bg-black/40 p-3 w-full min-w-0 rounded-xl border border-white/5 relative h-[150px] mt-2">
+                  {dashboardSparkline.ticker !== 'All' && dashboardSparkline.history.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={dashboardSparkline.history}>
+                        <defs>
+                          <linearGradient id="sparklineColorValue" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="var(--color-accent-teal)" stopOpacity={0.4}/>
+                            <stop offset="95%" stopColor="var(--color-accent-teal)" stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="dateStr" hide />
+                        <YAxis domain={['auto', 'auto']} hide />
+                        <Tooltip 
+                          contentStyle={{ 
+                            backgroundColor: 'rgba(13, 27, 42, 0.8)', 
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: '12px',
+                            backdropFilter: 'blur(8px)',
+                            color: '#fff'
+                          }} 
+                          itemStyle={{ color: '#fff' }}
+                          labelStyle={{ color: '#aaa', marginBottom: '4px' }}
+                          formatter={(value: number) => {
+                            const match = allData?.find(r => r.Ticker === dashboardSparkline.ticker);
+                            const isUS = match ? String(match["Tipo/Atividade"] || match["Tipo Atividade"] || "").trim().toUpperCase() === "US STOCKS" : false;
+                            return [`${isUS ? 'US$' : 'R$'} ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}`, 'Preço'];
+                          }}
+                          labelFormatter={(label: any) => label ? `Data: ${label}` : ''}
+                        />
+                        <Area 
+                          type="monotone" 
+                          dataKey="price" 
+                          stroke="var(--color-accent-teal)" 
+                          strokeWidth={2}
+                          fillOpacity={1} 
+                          fill="url(#sparklineColorValue)" 
+                          isAnimationActive={false}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-slate-500 text-sm">
+                      {dashboardSparkline.ticker === 'All' ? 'Use o filtro de Ticker acima para ver o gráfico YTD' : 'Sem dados para o período'}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Dashboard Panels Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
                 
@@ -2562,61 +2617,6 @@ export default function App() {
                       {computedPatrimonioVarYtd === null ? "---" : `${computedPatrimonioVarYtd >= 0 ? "+" : ""}${computedPatrimonioVarYtd.toFixed(2)}%`}
                     </h2>
                   </div>
-                </div>
-              </div>
-
-              {/* Sparkline YTD Dashboard */}
-              <div className="glass-panel p-5 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-3 w-full border border-[var(--color-accent-teal)]/20 bg-[var(--color-accent-teal)]/5">
-                <h3 className="font-bold text-[var(--color-accent-teal)] flex items-center gap-2">
-                  <Activity className="w-5 h-5" />
-                  Sparkline YTD ({dashboardSparkline.ticker === 'All' ? 'Selecione um Ticker no filtro' : dashboardSparkline.ticker})
-                </h3>
-
-                <div className="bg-black/40 p-3 w-full min-w-0 rounded-xl border border-white/5 relative h-[150px] mt-2">
-                  {dashboardSparkline.ticker !== 'All' && dashboardSparkline.history.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={dashboardSparkline.history}>
-                        <defs>
-                          <linearGradient id="sparklineColorValue" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="var(--color-accent-teal)" stopOpacity={0.4}/>
-                            <stop offset="95%" stopColor="var(--color-accent-teal)" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <XAxis dataKey="dateStr" hide />
-                        <YAxis domain={['auto', 'auto']} hide />
-                        <Tooltip 
-                          contentStyle={{ 
-                            backgroundColor: 'rgba(13, 27, 42, 0.8)', 
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            borderRadius: '12px',
-                            backdropFilter: 'blur(8px)',
-                            color: '#fff'
-                          }} 
-                          itemStyle={{ color: '#fff' }}
-                          labelStyle={{ color: '#aaa', marginBottom: '4px' }}
-                          formatter={(value: number) => {
-                            const match = allData?.find(r => r.Ticker === dashboardSparkline.ticker);
-                            const isUS = match ? String(match["Tipo/Atividade"] || match["Tipo Atividade"] || "").trim().toUpperCase() === "US STOCKS" : false;
-                            return [`${isUS ? 'US$' : 'R$'} ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}`, 'Preço'];
-                          }}
-                          labelFormatter={(label: any) => label ? `Data: ${label}` : ''}
-                        />
-                        <Area 
-                          type="monotone" 
-                          dataKey="price" 
-                          stroke="var(--color-accent-teal)" 
-                          strokeWidth={2}
-                          fillOpacity={1} 
-                          fill="url(#sparklineColorValue)" 
-                          isAnimationActive={false}
-                        />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-slate-500 text-sm">
-                      {dashboardSparkline.ticker === 'All' ? 'Use o filtro de Ticker acima para ver o gráfico YTD' : 'Sem dados para o período'}
-                    </div>
-                  )}
                 </div>
               </div>
 
