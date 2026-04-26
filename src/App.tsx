@@ -93,7 +93,7 @@ const REQUIRED_COLUMNS = [
   "Preço Médio",
   "B3 Preço Un",
   "B3 Preço total",
-  "Tipo Atividade",
+  "Tipo/Atividade",
   "Banco/Corretora",
   "CNPJ",
   "IR",
@@ -119,7 +119,7 @@ const normalizeHeader = (header: string) => {
   
   if (norm.includes('avarage price') || norm.includes('average price') || norm.includes('preço médio') || norm.includes('preco medio') || norm === 'pm' || norm === 'preço medio') return 'Preço Médio';
   
-  if (norm.includes('instrument type') || norm.includes('tipo atividade') || norm.includes('categoria') || norm.includes('tipo de ativo') || norm.includes('mercado') || norm.includes('especificação') || norm === 'classe') return 'Tipo Atividade';
+  if (norm.includes('instrument type') || norm.includes('tipo atividade') || norm.includes('tipo/atividade') || norm.includes('categoria') || norm.includes('tipo de ativo') || norm.includes('mercado') || norm.includes('especificação') || norm === 'classe') return 'Tipo/Atividade';
   
   if (norm.includes('investment broker') || norm.includes('banco/corretora') || norm.includes('corretora') || norm.includes('instituição') || norm.includes('instituicao') || norm.includes('agente') || norm === 'banco') return 'Banco/Corretora';
   
@@ -137,7 +137,7 @@ const parseMoney = (val: any) => {
   if (typeof val === 'number') return val;
   
   // Remove currency symbols and common spacing
-  let str = String(val).replace(/R\$\s?/gi, "").replace(/\$\s?/g, "").trim();
+  let str = String(val).replace(/US\$\s?/gi, "").replace(/R\$\s?/gi, "").replace(/\$\s?/g, "").trim();
   if (str === "" || str.toLowerCase() === "nan") return 0;
 
   // Detect negative values (handles (1.234,56) or -1.234,56)
@@ -214,7 +214,7 @@ export default function App() {
   const [filterYear, setFilterYear] = useState<string>(currentYear);
   const [filterMonth, setFilterMonth] = useState<string>(currentMonth);
   const [filterTipoAtividade, setFilterTipoAtividade] = useState<string>("All");
-  const [pieViewMode, setPieViewMode] = useState<'Ticker' | 'Tipo Atividade' | 'Banco/Corretora'>('Ticker');
+  const [pieViewMode, setPieViewMode] = useState<'Ticker' | 'Tipo/Atividade' | 'Banco/Corretora'>('Ticker');
   const [selectedYieldYear, setSelectedYieldYear] = useState<string>(currentYear);
 
   const [dashboardSparkline, setDashboardSparkline] = useState<{ ticker: string, history: { index: number, price: number, dateStr?: string }[] }>({ ticker: 'All', history: [] });
@@ -264,23 +264,36 @@ export default function App() {
   const [formIr, setFormIr] = useState("");
   const [formCorretora, setFormCorretora] = useState("");
   const [formCnpj, setFormCnpj] = useState("");
+  const [formDollar, setFormDollar] = useState("");
 
   const isTrade = formTransacao === "Compra" || formTransacao === "Venda";
 
-  const handleCurrencyChange = (setter: React.Dispatch<React.SetStateAction<string>>) => (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCurrencyChange = (setter: React.Dispatch<React.SetStateAction<string>>, prefix = "R$ ") => (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value;
     value = value.replace(/\D/g, ""); // remove all non-digits
     if (value === "") { setter(""); return; }
     
     let numValue = (parseInt(value, 10) / 100).toFixed(2);
     let formatted = numValue.replace(".", ",").replace(/(\d)(?=(\d{3})+(?!\d))/g, "$1.");
-    setter(`R$ ${formatted}`);
+    setter(`${prefix}${formatted}`);
   };
 
-  const parseFormattedNumber = (val: string) => {
-    if (!val) return 0;
-    const cleanVal = val.replace(/R\$\s?/g, '').replace(/\./g, '').replace(',', '.');
-    return parseFloat(cleanVal) || 0;
+  const parseFormattedNumber = (val: string | number) => {
+    if (val === undefined || val === null || val === "") return 0;
+    if (typeof val === "number") return val;
+    const strVal = String(val).trim();
+    
+    // If it looks like our formatted currency string (e.g. "R$ 15,00" or "1.500,00" with commas as decimal):
+    // Note: checking if it has a comma. In PT-BR, comma is decimal. 
+    // If it has R$ or US$, we also treat it as PT-BR style number.
+    if (/^(US\$|R\$)/i.test(strVal) || (strVal.includes(',') && !strVal.includes('.') && /^\d+,\d+$/.test(strVal)) || (strVal.includes(',') && strVal.includes('.'))) {
+       let cleanVal = strVal.replace(/US\$\s?/gi, '').replace(/R\$\s?/gi, '').replace(/\./g, '').replace(',', '.');
+       return parseFloat(cleanVal) || 0;
+    }
+    
+    // Fallback: standard JS float parsing (works for "10.5" from type="number")
+    const cleanNum = strVal.replace(/US\$\s?/gi, '').replace(/R\$\s?/gi, '').replace(',', '.');
+    return parseFloat(cleanNum) || 0;
   };
 
   const fetchFinancialMarketInfo = async (ticker: string, date: string) => {
@@ -480,36 +493,84 @@ export default function App() {
       const marketInfo = await fetchFinancialMarketInfo(ticker, formattedDate);
       
       const b3PrecoUn = marketInfo?.price || 0;
-      const dollar = marketInfo?.dollar || 5.0; // Fallback se falhar
+      let dollar = 5.0; // Fallback se falhar
+      if ((formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade).trim().toUpperCase() === "US STOCKS") {
+         const parsedD = parseMoney(formDollar);
+         if (parsedD > 0) dollar = parsedD;
+         else dollar = marketInfo?.dollar || 5.0;
+      } else {
+         dollar = marketInfo?.dollar || 5.0;
+      }
       
-      const unNum = parseFormattedNumber(formUn);
-      const precoUnNum = parseFormattedNumber(formPrecoUn);
+      const unNum = parseMoney(formUn);
+      const precoUnNum = parseMoney(formPrecoUn);
       const bancoCorretora = formCorretora;
       
-      // B3 Preço total = IFERROR(IF(Banco/Corretora ="Nomad";Saldo de Un*B3 Preço Un*Dollar;Saldo de Un*B3 Preço Un);"")
-      // Aqui usamos UN da transação para o registro individual
+      const parseNumLiteral = (val: any) => {
+        if (!val) return 0;
+        let str = String(val).replace(/US\$\s?/gi, "").replace(/R\$\s?/gi, "").replace(/\$\s?/g, "").trim();
+        if (str.includes(',') && str.includes('.')) {
+          if (str.lastIndexOf(',') > str.lastIndexOf('.')) str = str.replace(/\./g, "").replace(",", ".");
+          else str = str.replace(/,/g, "");
+        } else if (str.includes(',')) str = str.replace(",", ".");
+        const num = parseFloat(str);
+        return isNaN(num) ? 0 : num;
+      };
+
+      let previousSaldoUn = 0;
+      let previousSaldoCusto = 0;
+      
+      if (allData) {
+         const historicalData = allData.filter(r => r.Ticker === ticker);
+         if (historicalData.length > 0) {
+            const lastRecord = historicalData[historicalData.length - 1];
+            previousSaldoUn = parseNumLiteral(lastRecord["Saldo de Un"]);
+            previousSaldoCusto = parseNumLiteral(lastRecord["Saldo Custo"]);
+         }
+      }
+
+      let currentUn = isTrade ? unNum : 0;
+      if (formTransacao.toUpperCase().includes("VENDA") || formTransacao.toUpperCase().includes("SELL")) {
+         currentUn = -Math.abs(currentUn);
+      }
+
+      let totalCusto = currentUn * (isTrade ? precoUnNum : 0);
+      const isUS = (formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade).trim().toUpperCase() === "US STOCKS";
+      let totalCustoBRL = totalCusto;
+      if (isUS) {
+         totalCustoBRL = totalCusto * dollar;
+      }
+      const newSaldoUn = previousSaldoUn + currentUn;
+      // Saldo Custo = Total de Custo (BRL) + Saldo Custo (anterior)
+      const newSaldoCusto = previousSaldoCusto + totalCustoBRL; 
+      const newPrecoMedio = newSaldoUn !== 0 ? (Math.abs(newSaldoCusto) / Math.abs(newSaldoUn)) : 0;
+      
+      // B3 Preço total calculado sobre Saldo de Un
       let b3PrecoTotal = 0;
       if (bancoCorretora === "Nomad") {
-        b3PrecoTotal = unNum * b3PrecoUn * dollar;
+        b3PrecoTotal = newSaldoUn * b3PrecoUn * dollar;
       } else {
-        b3PrecoTotal = unNum * b3PrecoUn;
+        b3PrecoTotal = newSaldoUn * b3PrecoUn;
       }
 
       const newRecord = {
         "Data": formattedDate,
         "Ticker": ticker,
         "Transação": formTransacao.toUpperCase(),
-        "Tipo Atividade": formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade,
+        "Tipo/Atividade": formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade,
         "UN": isTrade ? formUn : "",
-        "Preço Un de Custo": isTrade ? formPrecoUn : "",
+        "Preço Un de Custo": isTrade ? (isUS ? `US$ ${precoUnNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : `R$ ${precoUnNum.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`) : "",
+        "Total do Custo": totalCustoBRL !== 0 ? `R$ ${totalCustoBRL.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "",
+        "Saldo de Un": newSaldoUn.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 }),
+        "Saldo Custo": `R$ ${newSaldoCusto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+        "Preço Médio": newPrecoMedio > 0 ? `R$ ${newPrecoMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : "",
         "Yields": !isTrade ? formYields : "",
         "IR": formIr,
         "Banco/Corretora": bancoCorretora,
         "CNPJ": formCnpj,
-        "B3 Preço Un": b3PrecoUn.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-        "B3 Preço total": b3PrecoTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+        "B3 Preço Un": isUS ? `US$ ${b3PrecoUn.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : `R$ ${b3PrecoUn.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+        "B3 Preço total": b3PrecoTotal !== 0 ? `R$ ${b3PrecoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "",
         "Dollar": dollar.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-        "Saldo de Un": unNum, // Para compatibilidade com a fórmula do usuário no futuro
         userId: user.uid,
         createdAt: serverTimestamp()
       };
@@ -529,6 +590,7 @@ export default function App() {
       setFormPrecoUn("");
       setFormYields("");
       setFormIr("");
+      setFormDollar("");
       
       alert("Operação registrada com sucesso!");
     } catch (error) {
@@ -930,6 +992,10 @@ export default function App() {
       ? spreadsheetId.split('/d/')[1].split('/')[0] 
       : spreadsheetId.trim();
 
+    const formatBRL = (val: number) => {
+      return val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
     const rowDataArr = new Array(24).fill("");
     rowDataArr[3] = record["Data"] ?? "";
     rowDataArr[4] = record["Ticker"] ?? "";
@@ -938,16 +1004,20 @@ export default function App() {
     rowDataArr[7] = record["UN"] ?? "";
     rowDataArr[8] = record["Saldo de Un"] ?? "";
     rowDataArr[9] = record["Preço Un de Custo"] ?? "";
-    rowDataArr[10] = record["Total do Custo"] ?? "";
+    
+    // Total do Custo formatado como R$ 1.234,56
+    const totalCustoVal = parseMoney(record["Total do Custo"]);
+    rowDataArr[10] = formatBRL(totalCustoVal);
+    
     rowDataArr[11] = record["Saldo do Custo"] ?? record["Saldo Custo"] ?? "";
     rowDataArr[12] = record["Preço Médio"] ?? "";
     rowDataArr[13] = record["B3 Preço Un"] ?? "";
     rowDataArr[14] = record["B3 Preço total"] ?? "";
-    rowDataArr[19] = record["Tipo Atividade"] ?? "";
+    rowDataArr[19] = record["Tipo/Atividade"] ?? record["Tipo Atividade"] ?? "";
     rowDataArr[20] = record["Banco/Corretora"] ?? "";
     rowDataArr[21] = record["CNPJ"] ?? "";
     rowDataArr[22] = record["IR"] ?? "";
-    rowDataArr[23] = record["Dollar"] ?? "";
+    rowDataArr[23] = '=INDEX(IFERROR(GOOGLEFINANCE("CURRENCY:USDBRL"; "price"; INDIRECT("D"&ROW())); GOOGLEFINANCE("CURRENCY:USDBRL"; "price"; INDIRECT("D"&ROW())-1)); 2; 2)';
 
     try {
       const resp = await fetch('/api/sheets/append', {
@@ -1152,7 +1222,8 @@ export default function App() {
         }
       }
       if (match) {
-        if (match["Tipo Atividade"]) setFormTipoAtividade(String(match["Tipo Atividade"]));
+        const tipoAtivM = match["Tipo/Atividade"] || match["Tipo Atividade"];
+        if (tipoAtivM) setFormTipoAtividade(String(tipoAtivM));
         if (match["Banco/Corretora"]) setFormCorretora(String(match["Banco/Corretora"]));
         if (match["CNPJ"]) setFormCnpj(String(match["CNPJ"]));
       }
@@ -1265,14 +1336,7 @@ export default function App() {
     if (!data) return [];
     
     const parseNum = (val: any) => {
-      if (!val) return 0;
-      let str = String(val).replace(/R\$\s?/gi, "").replace(/\$\s?/g, "").trim();
-      if (str.includes(',') && str.includes('.')) {
-        if (str.lastIndexOf(',') > str.lastIndexOf('.')) str = str.replace(/\./g, "").replace(",", ".");
-        else str = str.replace(/,/g, "");
-      } else if (str.includes(',')) str = str.replace(",", ".");
-      const num = parseFloat(str);
-      return isNaN(num) ? 0 : num;
+      return parseMoney(val);
     };
 
     // 1. Normalização Inicial e Limpeza (Cores, Espaços, Datas)
@@ -1351,7 +1415,7 @@ export default function App() {
     const uniqueMap = new Map<string, any>();
     cleanRows.forEach(row => {
       let parts: string[] = [];
-      const tipoAtiv = String(row["Tipo Atividade"] || "").trim().toUpperCase();
+      const tipoAtiv = String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "").trim().toUpperCase();
       const transacao = String(row["Transação"] || "").trim().toUpperCase();
       
       // Para rendimentos, quantidade e preço muitas vezes vêm zerados de formas diferentes
@@ -1433,21 +1497,53 @@ export default function App() {
       if (isVenda && currentUn > 0) currentUn = -currentUn;
 
       const precoUn = parseNum(row["Preço Un de Custo"]);
-      const totalCusto = currentUn * precoUn;
+      let totalCustoBRL = parseNum(row["Total do Custo"]);
+      if (isVenda && totalCustoBRL > 0) totalCustoBRL = -totalCustoBRL;
       
+      // Se não houver Total do Custo no CSV, calcula
+      if (totalCustoBRL === 0 && precoUn !== 0) {
+        let tc = currentUn * precoUn;
+        const isUS = String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "").trim().toUpperCase() === "US STOCKS";
+        if (isUS) {
+           let dVal = parseNum(row["Dollar"]);
+           if (dVal <= 0) dVal = 1;
+           totalCustoBRL = tc * dVal;
+        } else {
+           totalCustoBRL = tc;
+        }
+      }
+      
+      const isUS = String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "").trim().toUpperCase() === "US STOCKS";
       state.saldoUn += currentUn;
-      state.saldoCusto += totalCusto;
+      state.saldoCusto += totalCustoBRL; // Saldo Custo = Total de Custo + Saldo Custo (anterior)
       
       const precoMedio = state.saldoUn !== 0 ? (Math.abs(state.saldoCusto) / Math.abs(state.saldoUn)) : 0;
 
       // Formatação para Display
-      row["Total do Custo"] = totalCusto !== 0 ? `R$ ${totalCusto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "";
-      row["Saldo de Un"] = state.saldoUn.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+      if (isUS) {
+        row["Preço Un de Custo"] = precoUn !== 0 ? `US$ ${precoUn.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "";
+      } else {
+        row["Preço Un de Custo"] = precoUn !== 0 ? `R$ ${precoUn.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "";
+      }
+      
+      // 'Total do Custo' multiplicado pelo dólar
+      row["Total do Custo"] = totalCustoBRL !== 0 ? `R$ ${totalCustoBRL.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "";
+      
+      // 'Saldo Custo' e 'Preço Médio' NÃO multiplicados pelo dólar (usam Reais como prefixo conforme instrução estrita)
       row["Saldo Custo"] = `R$ ${state.saldoCusto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
       row["Preço Médio"] = precoMedio > 0 ? `R$ ${precoMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : "";
       
       // B3 Pricing (Só recalcula se o CSV não trouxe o valor já calculado)
       const b3Un = parseNum(row["B3 Preço Un"]);
+      
+      if (b3Un !== 0) {
+        if (isUS) {
+          row["B3 Preço Un"] = `US$ ${b3Un.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+        } else {
+          row["B3 Preço Un"] = `R$ ${b3Un.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+        }
+      }
+
       const b3TotalExistente = String(row["B3 Preço total"] || "").trim();
       const jaTemB3Total = b3TotalExistente !== "" && 
                            b3TotalExistente !== "NOT FOUND" && 
@@ -1511,7 +1607,7 @@ export default function App() {
 
   const atividades = useMemo(() => {
     if (!allData) return [];
-    return Array.from(new Set(allData.map(r => String(r["Tipo Atividade"] || "").trim()).filter(Boolean))).sort();
+    return Array.from(new Set(allData.map(r => String(r["Tipo/Atividade"] || r["Tipo Atividade"] || "").trim()).filter(Boolean))).sort();
   }, [allData]);
 
   const corretoras = useMemo(() => {
@@ -1611,7 +1707,7 @@ export default function App() {
       const matchTicker = t === "All" || ticker === t;
       if (!matchTicker) return;
 
-      const tipoAtiv = String(row["Tipo Atividade"] || "").trim();
+      const tipoAtiv = String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "").trim();
       const matchTipo = tp === "All" || tipoAtiv === tp;
       if (!matchTipo) return;
 
@@ -1858,7 +1954,7 @@ export default function App() {
         if (b3TotalStr && b3TotalStr !== "NOT FOUND") {
           latestTickerInfo.set(ticker, {
             value: parseMoney(b3TotalStr),
-            type: String(row["Tipo Atividade"] || "Não Especificado"),
+            type: String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "Não Especificado"),
             broker: String(row["Banco/Corretora"] || "Não Especificado")
           });
         }
@@ -1868,7 +1964,7 @@ export default function App() {
     const aggregated = new Map<string, number>();
     latestTickerInfo.forEach((info, ticker) => {
       let key = ticker;
-      if (pieViewMode === 'Tipo Atividade') key = info.type;
+      if (pieViewMode === 'Tipo/Atividade') key = info.type;
       if (pieViewMode === 'Banco/Corretora') key = info.broker;
       
       if (key && key.toLowerCase() !== "outros") {
@@ -2498,7 +2594,11 @@ export default function App() {
                           }} 
                           itemStyle={{ color: '#fff' }}
                           labelStyle={{ color: '#aaa', marginBottom: '4px' }}
-                          formatter={(value: number) => [`R$ ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}`, 'Preço']}
+                          formatter={(value: number) => {
+                            const match = allData?.find(r => r.Ticker === dashboardSparkline.ticker);
+                            const isUS = match ? String(match["Tipo/Atividade"] || match["Tipo Atividade"] || "").trim().toUpperCase() === "US STOCKS" : false;
+                            return [`${isUS ? 'US$' : 'R$'} ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}`, 'Preço'];
+                          }}
                           labelFormatter={(label: any) => label ? `Data: ${label}` : ''}
                         />
                         <Area 
@@ -2579,7 +2679,7 @@ export default function App() {
                   <div className="flex flex-col md:flex-row-reverse gap-6 flex-1">
                     {/* Lateral View Selection Buttons on the Right */}
                     <div className="flex flex-row md:flex-col gap-2 shrink-0 md:w-32 lg:w-40 overflow-x-auto md:overflow-x-visible pb-2 md:pb-0 custom-scrollbar">
-                      {(['Ticker', 'Tipo Atividade', 'Banco/Corretora'] as const).map((mode) => (
+                      {(['Ticker', 'Tipo/Atividade', 'Banco/Corretora'] as const).map((mode) => (
                         <button
                           key={mode}
                           onClick={() => setPieViewMode(mode)}
@@ -2589,7 +2689,7 @@ export default function App() {
                               : 'bg-white/5 border-white/10 text-[var(--color-accent-teal)] opacity-60 hover:opacity-100 hover:bg-white/10'
                           }`}
                         >
-                          {mode === 'Ticker' ? 'Ticker' : mode === 'Tipo Atividade' ? 'Atividade' : 'Corretora'}
+                          {mode === 'Ticker' ? 'Ticker' : mode === 'Tipo/Atividade' ? 'Atividade' : 'Corretora'}
                         </button>
                       ))}
                     </div>
@@ -2797,7 +2897,7 @@ export default function App() {
                              </tr>
                            </thead>
                            <tbody className="divide-y divide-white/5">
-                             {filteredData.map((row, index) => (
+                             {[...(filteredData || [])].reverse().map((row, index) => (
                                <tr key={index} className="hover:bg-white/5 transition-colors group">
                                  {REQUIRED_COLUMNS.map((colKey, j) => (
                                    <td key={j} className="p-4 text-slate-300 font-medium">
@@ -2871,9 +2971,13 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
-                      {tickers.length > 0 ? tickers.map((ticker) => {
+                      {tickers.filter(t => t !== 'ENBR3').length > 0 ? tickers.filter(t => t !== 'ENBR3').map((ticker) => {
                         const info = swingTradeData[ticker];
                         
+                        // Discover if it's US Stocks from allData
+                        const latestTickerData = allData ? [...allData].reverse().find(r => r.Ticker === ticker) : null;
+                        const isUS = latestTickerData ? String(latestTickerData["Tipo/Atividade"] || latestTickerData["Tipo Atividade"] || "").trim().toUpperCase() === "US STOCKS" : false;
+
                         const renderPerf = (perf: any) => {
                           if (!info) return <span className="text-white italic">-</span>;
                           
@@ -2910,7 +3014,7 @@ export default function App() {
                                 </div>
                               ) : info && info.currentPrice > 0 ? (
                                 <span className="font-mono text-white">
-                                  R$ {info.currentPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  {isUS ? 'US$' : 'R$'} {info.currentPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               ) : info && info.currentPrice === 0 ? (
                                 <span className="text-rose-500 font-bold uppercase text-[10px]">NOT FOUND</span>
@@ -3002,7 +3106,7 @@ export default function App() {
                     </div>
 
                     <div className="flex flex-col gap-2">
-                      <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Tipo Atividade</label>
+                      <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Tipo/Atividade</label>
                       <select 
                         value={formTipoAtividade}
                         onChange={(e) => setFormTipoAtividade(e.target.value)}
@@ -3096,20 +3200,43 @@ export default function App() {
                             type="text" 
                             inputMode="decimal"
                             value={formPrecoUn}
-                            onChange={handleCurrencyChange(setFormPrecoUn)}
-                            placeholder="R$ 0,00" 
+                            onChange={handleCurrencyChange(setFormPrecoUn, (formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade).trim().toUpperCase() === "US STOCKS" ? "US$ " : "R$ ")}
+                            placeholder={(formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade).trim().toUpperCase() === "US STOCKS" ? "US$ 0.00" : "R$ 0,00"} 
                             className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
                           />
                         </div>
-                        <div className="flex flex-col gap-2">
-                          <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Total do Custo</label>
-                          <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 justify-center flex items-center text-[#2dd4bf] font-bold pointer-events-none w-full min-h-[46px]">
-                            R$ {(
-                                (parseFormattedNumber(formUn)) * 
-                                (parseFormattedNumber(formPrecoUn))
-                              ).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        
+                        {(formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade).trim().toUpperCase() === "US STOCKS" && (
+                          <div className="flex flex-col gap-2">
+                            <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest text-rose-300">Cotação do Dólar</label>
+                            <input 
+                              type="text" 
+                              inputMode="decimal"
+                              value={formDollar}
+                              onChange={handleCurrencyChange(setFormDollar, "R$ ")}
+                              placeholder="R$ 5,00" 
+                              className="bg-rose-500/10 backdrop-blur-md border border-rose-500/30 rounded-xl p-3 text-rose-300 font-bold placeholder-rose-500/50 focus:outline-none focus:ring-2 focus:ring-rose-400 outline-none" 
+                            />
                           </div>
-                        </div>
+                        )}
+                        {(() => {
+                          const cUnNum = parseMoney(formUn);
+                          const cPrNum = parseMoney(formPrecoUn);
+                          const isUsStock = (formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade).trim().toUpperCase() === "US STOCKS";
+                          const cDolNum = isUsStock ? (parseMoney(formDollar) || 5.0) : 1;
+                          const totalBRLValue = Math.abs(cUnNum * cPrNum * cDolNum);
+
+                          return (
+                            <div className="flex flex-col gap-2">
+                              <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">
+                                {formTransacao === "Venda" ? "Total da Venda (R$)" : "Total do Custo (R$)"}
+                              </label>
+                              <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 justify-center flex items-center text-[#2dd4bf] font-bold pointer-events-none w-full min-h-[46px] text-center">
+                                {totalBRLValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </>
                     )}
                   </div>

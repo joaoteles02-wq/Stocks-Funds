@@ -34,12 +34,20 @@ app.post("/api/finance/quote", async (req, res) => {
     if (cleanTicker.startsWith("BVMF:")) {
       cleanTicker = cleanTicker.substring(5);
     }
-    const isBrazilian = /^[A-Z]{4}[0-9]{1,2}$/.test(cleanTicker) || cleanTicker === "BOVA11" || cleanTicker === "SMAL11";
+    const isBrazilian = /^[A-Z0-9]{4}[0-9]{1,2}$/.test(cleanTicker) || cleanTicker === "BOVA11" || cleanTicker === "SMAL11";
     const cryptoSet = new Set(["BTC", "ETH", "USDT", "BNB", "SOL", "USDC", "XRP", "ADA", "DOGE", "AVAX", "DOT", "LINK", "MATIC", "SHIB", "UNI", "LTC", "BITCOIN"]);
     
-    // Automatically convert pure crypto tickers to USD pair for Yahoo Finance
+    let isCryptoBrl = false;
+    let cryptoUsdTicker = "";
+
     if (cryptoSet.has(cleanTicker) || cleanTicker === "BITCOIN") {
       cleanTicker = cleanTicker === "BITCOIN" ? "BTC-USD" : `${cleanTicker}-USD`;
+    } else if (cleanTicker.endsWith("BRL")) {
+      const baseToken = cleanTicker.replace("BRL", "");
+      if (cryptoSet.has(baseToken) || baseToken === "BITCOIN") {
+        isCryptoBrl = true;
+        cryptoUsdTicker = baseToken === "BITCOIN" ? "BTC-USD" : `${baseToken}-USD`;
+      }
     }
 
     const signal = AbortSignal.timeout(8000);
@@ -90,12 +98,27 @@ app.post("/api/finance/quote", async (req, res) => {
       
       // Fallback ou padrão internacional
       let quote;
+      let usdToBrlQuote;
       try {
         // Tenta com .SA se parecer brasileiro mas falhou no Brapi
         if (isBrazilian) {
           quote = await yahooFinance.quote(`${cleanTicker}.SA`);
+        } else if (isCryptoBrl) {
+          const [usdQuote, brlQuote] = await Promise.all([
+            yahooFinance.quote(cryptoUsdTicker).catch(() => null),
+            yahooFinance.quote('BRL=X').catch(() => null)
+          ]);
+          if (usdQuote && brlQuote) {
+             quote = {
+                ...usdQuote,
+                regularMarketPrice: (usdQuote.regularMarketPrice || 0) * (brlQuote.regularMarketPrice || 0),
+                price: (usdQuote.regularMarketPrice || 0) * (brlQuote.regularMarketPrice || 0),
+                symbol: cryptoUsdTicker
+             };
+             usdToBrlQuote = brlQuote.regularMarketPrice;
+          }
         } else if (cleanTicker.endsWith("BRL")) {
-          // Especial para pares BRL que o Yahoo costuma chamar de TICKER-BRL ou TICKERBRL=X
+          // Especial para pares BRL que não são criptomoedas padrão do app
           const baseToken = cleanTicker.replace("BRL", "");
           try {
              quote = await yahooFinance.quote(`${baseToken}-BRL`);
@@ -106,7 +129,7 @@ app.post("/api/finance/quote", async (req, res) => {
           quote = await yahooFinance.quote(cleanTicker);
         }
       } catch (e) {
-        // Se falhou com .SA, tenta sem
+        // Se falhou tenta sem .SA ou fallback final
         try {
           quote = await yahooFinance.quote(cleanTicker);
         } catch (e2) {
@@ -135,20 +158,21 @@ app.post("/api/finance/quote", async (req, res) => {
         if (hist && hist.length > 0) {
           const now = Date.now();
           const targetYtd = new Date(new Date().getFullYear(), 0, 1).getTime();
+          const multiplier = usdToBrlQuote || 1;
           
           sparkline = hist
             .filter((h: any) => {
                const time = h.date ? new Date(h.date).getTime() : 0;
                return time >= targetYtd && typeof h.close === 'number';
             })
-            .map((h: any) => ({ price: h.close, date: new Date(h.date).getTime() }));
+            .map((h: any) => ({ price: h.close * multiplier, date: new Date(h.date).getTime() }));
 
           const getPriceFromTarget = (target: number) => {
              return hist.reduce((prev: any, curr: any) => {
                 const prevTime = prev.date ? new Date(prev.date).getTime() : 0;
                 const currTime = curr.date ? new Date(curr.date).getTime() : 0;
                 return Math.abs(currTime - target) < Math.abs(prevTime - target) ? curr : prev;
-             }).close;
+             }).close * multiplier;
           };
           
           const week = getPriceFromTarget(now - 7 * 24 * 60 * 60 * 1000);
@@ -178,8 +202,6 @@ app.post("/api/finance/quote", async (req, res) => {
   tickers.forEach((t, i) => {
     if (settledResults[i].status === 'fulfilled' && settledResults[i].value) {
       results[t] = settledResults[i].value;
-    } else {
-        console.log(`[Debug] Ticker ${t} failed or returned null`);
     }
   });
 
@@ -325,8 +347,33 @@ app.post("/api/sheets/delete", async (req, res) => {
     const uIdx = 7;  // UN
     const typeIdx = 19; // Tipo Atividade
 
-    const cleanNum = (str: any) => String(str || "").replace(/[^\d]/g, "");
+    const cleanNumStr = (str: any) => {
+        if (!str) return 0;
+        let s = String(str).replace(/R\$\s?/gi, "").replace(/\$\s?/g, "").trim();
+        if (s.includes(',') && s.includes('.')) {
+          if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, "").replace(",", ".");
+          else s = s.replace(/,/g, "");
+        } else if (s.includes(',')) s = s.replace(",", ".");
+        return parseFloat(s) || 0;
+    };
     const cleanStr = (str: any) => String(str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
+
+    const normalizeDate = (dateStr: any) => {
+      let s = String(dateStr || "").trim();
+      if (!s) return "";
+      s = s.replace(/\./g, '/').split(' ')[0];
+      let p: string[] = [];
+      if (s.includes('/')) p = s.split('/');
+      else if (s.includes('-')) p = s.split('-');
+      if (p.length === 3) {
+        let y = p[0].length === 4 ? p[0] : p[2];
+        let m = p[1];
+        let d = p[0].length === 4 ? p[2] : p[0];
+        if (y.length === 2) y = "20" + y;
+        return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
+      }
+      return s;
+    };
 
     let rowIndexToDelete = -1;
     console.log(`🗑️ Attempting to delete from sheet: Ticker=${rowData.Ticker}, Transact=${rowData.Transação}, UN=${rowData.UN}, Data=${rowData.Data}`);
@@ -340,14 +387,14 @@ app.post("/api/sheets/delete", async (req, res) => {
         const transactValue = rowData.Transação || rowData.Transacao || "";
         const isTransMatch = cleanStr(r[transIdx]) === cleanStr(transactValue);
         
-        const rUnNum = cleanNum(r[uIdx]);
-        const rowUnNum = cleanNum(rowData.UN);
-        const isUnMatch = rUnNum === rowUnNum || (rUnNum === "" && rowUnNum === "");
+        const rUnNum = cleanNumStr(r[uIdx]);
+        const rowUnNum = cleanNumStr(rowData.UN);
+        const isUnMatch = Math.abs(rUnNum - rowUnNum) < 0.0001 || (r[uIdx] === "" && rowData.UN === "");
         
         // Match Date
-        const rDate = String(r[dIdx] || "").trim();
-        const rowDate = String(rowData.Data || "").trim();
-        const isDateMatch = rDate === rowDate;
+        const rDate = normalizeDate(r[dIdx] || "");
+        const rowDate = normalizeDate(rowData.Data || "");
+        const isDateMatch = rDate === rowDate || rDate === "" || rowDate === "";
 
         if (isTickerMatch && isTransMatch && isUnMatch && isDateMatch) {
             console.log(`✅ Found exact match at row ${i} (1-based: ${i + 1}). Row Data: ${JSON.stringify(r)}`);
