@@ -506,6 +506,19 @@ export default function App() {
       const precoUnNum = parseMoney(formPrecoUn);
       const bancoCorretora = formCorretora;
       
+      const isUS = (formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade).trim().toUpperCase() === "US STOCKS";
+
+      let finalYields = formYields;
+      let finalIr = formIr;
+      
+      if (!isTrade && isUS) {
+        const cYields = parseMoney(formYields) * dollar;
+        finalYields = cYields !== 0 ? `R$ ${cYields.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "";
+        
+        const cIr = parseMoney(formIr) * dollar;
+        finalIr = cIr !== 0 ? `R$ ${cIr.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "";
+      }
+
       const parseNumLiteral = (val: any) => {
         if (!val) return 0;
         let str = String(val).replace(/US\$\s?/gi, "").replace(/R\$\s?/gi, "").replace(/\$\s?/g, "").trim();
@@ -535,7 +548,6 @@ export default function App() {
       }
 
       let totalCusto = currentUn * (isTrade ? precoUnNum : 0);
-      const isUS = (formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade).trim().toUpperCase() === "US STOCKS";
       let totalCustoBRL = totalCusto;
       if (isUS) {
          totalCustoBRL = totalCusto * dollar;
@@ -564,8 +576,8 @@ export default function App() {
         "Saldo de Un": newSaldoUn.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 }),
         "Saldo Custo": `R$ ${newSaldoCusto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
         "Preço Médio": newPrecoMedio > 0 ? `R$ ${newPrecoMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : "",
-        "Yields": !isTrade ? formYields : "",
-        "IR": formIr,
+        "Yields": !isTrade ? finalYields : "",
+        "IR": finalIr,
         "Banco/Corretora": bancoCorretora,
         "CNPJ": formCnpj,
         "B3 Preço Un": isUS ? `US$ ${b3PrecoUn.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : `R$ ${b3PrecoUn.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
@@ -1418,10 +1430,8 @@ export default function App() {
       const tipoAtiv = String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "").trim().toUpperCase();
       const transacao = String(row["Transação"] || "").trim().toUpperCase();
       
-      // Para rendimentos, quantidade e preço muitas vezes vêm zerados de formas diferentes
-      // na mesma corretora, o que quebra a desduplicação e soma duas vezes
       const isYield = tipoAtiv.includes("RENDIMENTO") || tipoAtiv.includes("JURO") || tipoAtiv.includes("DIVIDEND") || tipoAtiv.includes("STOCK PROCEEDS") || tipoAtiv.includes("PROCEEDS") ||
-                      transacao.includes("RENDIMENTO") || transacao.includes("JURO") || transacao.includes("DIVIDEND") || transacao.includes("STOCK PROCEEDS") || transacao.includes("PROCEEDS") || transacao.includes("JCP");
+                      transacao.includes("RENDIMENTO") || transacao.includes("JURO") || transacao.includes("DIVIDEND") || transacao.includes("STOCK PROCEEDS") || transacao.includes("PROCEEDS") || transacao.includes("JCP") || transacao.includes("TAX") || transacao.includes("IMPOSTO") || transacao.includes("IRRF") || transacao === "IR";
                       
       if (isYield) {
         parts = [
@@ -2551,7 +2561,7 @@ export default function App() {
                     </ResponsiveContainer>
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-slate-500 text-sm">
-                      {dashboardSparkline.ticker === 'All' ? 'Use o filtro de Ticker acima para ver o gráfico YTD' : 'Sem dados para o período'}
+                      {dashboardSparkline.ticker === 'All' ? '' : 'Sem dados para o período'}
                     </div>
                   )}
                 </div>
@@ -3127,7 +3137,7 @@ export default function App() {
                       )}
                     </div>
 
-                    {isTrade ? (
+                    {isTrade && (
                       <div className="flex flex-col gap-2">
                         <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">UN (Quantidade)</label>
                         <input 
@@ -3136,35 +3146,11 @@ export default function App() {
                           inputMode="decimal"
                           value={formUn}
                           onChange={(e) => setFormUn(e.target.value)}
+                          onWheel={(e) => e.currentTarget.blur()}
                           placeholder="Qtd." 
                           className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
                         />
                       </div>
-                    ) : (
-                      <>
-                        <div className="flex flex-col gap-2">
-                          <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Yields</label>
-                          <input 
-                            type="text" 
-                            inputMode="decimal"
-                            value={formYields}
-                            onChange={handleCurrencyChange(setFormYields)}
-                            placeholder="R$ 0,00" 
-                            className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)] outline-none" 
-                          />
-                        </div>
-                        <div className="flex flex-col gap-2">
-                          <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">IR (Imposto de Renda)</label>
-                          <input 
-                            type="text" 
-                            inputMode="decimal"
-                            value={formIr}
-                            onChange={handleCurrencyChange(setFormIr)}
-                            placeholder="R$ 0,00" 
-                            className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)] outline-none" 
-                          />
-                        </div>
-                      </>
                     )}
                   </div>
                   
@@ -3192,41 +3178,54 @@ export default function App() {
                       />
                     </div>
 
-                    {isTrade && (
-                      <>
-                        <div className="flex flex-col gap-2">
-                          <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Preço Un de Custo</label>
-                          <input 
-                            type="text" 
-                            inputMode="decimal"
-                            value={formPrecoUn}
-                            onChange={handleCurrencyChange(setFormPrecoUn, (formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade).trim().toUpperCase() === "US STOCKS" ? "US$ " : "R$ ")}
-                            placeholder={(formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade).trim().toUpperCase() === "US STOCKS" ? "US$ 0.00" : "R$ 0,00"} 
-                            className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
-                          />
-                        </div>
-                        
-                        {(formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade).trim().toUpperCase() === "US STOCKS" && (
-                          <div className="flex flex-col gap-2">
-                            <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest text-rose-300">Cotação do Dólar</label>
-                            <input 
-                              type="text" 
-                              inputMode="decimal"
-                              value={formDollar}
-                              onChange={handleCurrencyChange(setFormDollar, "R$ ")}
-                              placeholder="R$ 5,00" 
-                              className="bg-rose-500/10 backdrop-blur-md border border-rose-500/30 rounded-xl p-3 text-rose-300 font-bold placeholder-rose-500/50 focus:outline-none focus:ring-2 focus:ring-rose-400 outline-none" 
-                            />
-                          </div>
-                        )}
-                        {(() => {
-                          const cUnNum = parseMoney(formUn);
-                          const cPrNum = parseMoney(formPrecoUn);
-                          const isUsStock = (formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade).trim().toUpperCase() === "US STOCKS";
-                          const cDolNum = isUsStock ? (parseMoney(formDollar) || 5.0) : 1;
-                          const totalBRLValue = Math.abs(cUnNum * cPrNum * cDolNum);
+                    {(() => {
+                      const isUsStock = (formTipoAtividade === "NEW" ? formNewTipoAtividade : formTipoAtividade).trim().toUpperCase() === "US STOCKS";
+                      
+                      if (isTrade) {
+                        const cUnNum = parseMoney(formUn);
+                        const cPrNum = parseMoney(formPrecoUn);
+                        const cDolNum = isUsStock ? (parseMoney(formDollar) || 5.0) : 1;
+                        const totalBRLValue = Math.abs(cUnNum * cPrNum * cDolNum);
 
-                          return (
+                        return (
+                          <>
+                            <div className="flex flex-col gap-2">
+                              <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">
+                                {isUsStock ? "Preço US$" : "Preço Un de Custo"}
+                              </label>
+                              <input 
+                                type="text" 
+                                inputMode="decimal"
+                                value={formPrecoUn}
+                                onChange={handleCurrencyChange(setFormPrecoUn, isUsStock ? "US$ " : "R$ ")}
+                                placeholder={isUsStock ? "US$ 0.00" : "R$ 0,00"} 
+                                className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
+                              />
+                            </div>
+                            
+                            {isUsStock && (
+                              <div className="flex flex-col gap-2">
+                                <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest text-rose-300">Cotação do Dólar</label>
+                                <input 
+                                  type="text" 
+                                  inputMode="decimal"
+                                  value={formDollar}
+                                  onChange={handleCurrencyChange(setFormDollar, "R$ ")}
+                                  placeholder="R$ 5,00" 
+                                  className="bg-rose-500/10 backdrop-blur-md border border-rose-500/30 rounded-xl p-3 text-rose-300 font-bold placeholder-rose-500/50 focus:outline-none focus:ring-2 focus:ring-rose-400 outline-none" 
+                                />
+                              </div>
+                            )}
+
+                            {isUsStock && (
+                              <div className="flex flex-col gap-2">
+                                <label className="text-[10px] sm:text-xs font-bold text-slate-300 uppercase tracking-widest">Preço Un de Custo (R$)</label>
+                                <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 justify-center flex items-center text-slate-300 font-bold pointer-events-none w-full min-h-[46px] text-center">
+                                  {(cPrNum * cDolNum).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                </div>
+                              </div>
+                            )}
+
                             <div className="flex flex-col gap-2">
                               <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">
                                 {formTransacao === "Venda" ? "Total da Venda (R$)" : "Total do Custo (R$)"}
@@ -3235,10 +3234,96 @@ export default function App() {
                                 {totalBRLValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                               </div>
                             </div>
-                          );
-                        })()}
-                      </>
-                    )}
+                          </>
+                        );
+                      } else {
+                        const cYields = parseMoney(formYields);
+                        const cIr = parseMoney(formIr);
+                        const cDolNum = isUsStock ? (parseMoney(formDollar) || 5.0) : 1;
+
+                        return (
+                          <>
+                            {isUsStock ? (
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5 w-full md:col-span-2">
+                                <div className="flex flex-col gap-2">
+                                  <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest w-full truncate">Yields US$</label>
+                                  <input 
+                                    type="text" 
+                                    inputMode="decimal"
+                                    value={formYields}
+                                    onChange={handleCurrencyChange(setFormYields, "US$ ")}
+                                    placeholder="US$ 0.00" 
+                                    className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)] outline-none min-w-[50px] w-full" 
+                                  />
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                  <label className="text-[10px] sm:text-xs font-bold text-slate-300 uppercase tracking-widest w-full truncate">Yields R$</label>
+                                  <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 justify-center flex items-center text-slate-300 font-bold pointer-events-none w-full min-h-[46px] text-center truncate px-1">
+                                    {(cYields * cDolNum).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </div>
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                  <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest w-full truncate">IR US$</label>
+                                  <input 
+                                    type="text" 
+                                    inputMode="decimal"
+                                    value={formIr}
+                                    onChange={handleCurrencyChange(setFormIr, "US$ ")}
+                                    placeholder="US$ 0.00" 
+                                    className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)] outline-none min-w-[50px] w-full" 
+                                  />
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                  <label className="text-[10px] sm:text-xs font-bold text-slate-300 uppercase tracking-widest w-full truncate">IR R$</label>
+                                  <div className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 justify-center flex items-center text-slate-300 font-bold pointer-events-none w-full min-h-[46px] text-center truncate px-1">
+                                    {(cIr * cDolNum).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex flex-col gap-2">
+                                  <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest w-full truncate">Yields</label>
+                                  <input 
+                                    type="text" 
+                                    inputMode="decimal"
+                                    value={formYields}
+                                    onChange={handleCurrencyChange(setFormYields, "R$ ")}
+                                    placeholder="R$ 0,00" 
+                                    className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)] outline-none w-full" 
+                                  />
+                                </div>
+                                <div className="flex flex-col gap-2">
+                                  <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest w-full truncate">IR (Imposto de Renda)</label>
+                                  <input 
+                                    type="text" 
+                                    inputMode="decimal"
+                                    value={formIr}
+                                    onChange={handleCurrencyChange(setFormIr, "R$ ")}
+                                    placeholder="R$ 0,00" 
+                                    className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[var(--color-accent-teal)] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-violet)] outline-none w-full" 
+                                  />
+                                </div>
+                              </>
+                            )}
+
+                            {isUsStock && (
+                              <div className="flex flex-col gap-2 md:col-span-2 w-full">
+                                <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest text-rose-300">Cotação do Dólar</label>
+                                <input 
+                                  type="text" 
+                                  inputMode="decimal"
+                                  value={formDollar}
+                                  onChange={handleCurrencyChange(setFormDollar, "R$ ")}
+                                  placeholder="R$ 5,00" 
+                                  className="bg-rose-500/10 backdrop-blur-md border border-rose-500/30 rounded-xl p-3 text-rose-300 font-bold placeholder-rose-500/50 focus:outline-none focus:ring-2 focus:ring-rose-400 outline-none md:w-1/2 w-full" 
+                                />
+                              </div>
+                            )}
+                          </>
+                        );
+                      }
+                    })()}
                   </div>
                   
                   <div className="flex items-center gap-3 mt-4">
