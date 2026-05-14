@@ -712,7 +712,7 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
 
                 {/* Table */}
                 <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto overflow-y-auto max-h-[600px]">
                     {loading ? (
                       <div className="flex items-center justify-center p-8 text-gray-500 gap-2">
                         <RefreshCw size={14} className="animate-spin" /> Carregando...
@@ -723,12 +723,12 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
                       </div>
                     ) : (
                       <table className="w-full text-xs">
-                        <thead>
+                        <thead className="sticky top-0 z-30">
                           <tr className="border-b border-gray-800">
-                            <th className="text-left px-3 py-3 text-gray-500 font-medium whitespace-nowrap sticky left-0 bg-gray-900 z-20 w-[90px] min-w-[90px]">Data</th>
-                            <th className="text-left px-3 py-3 text-gray-500 font-medium whitespace-nowrap sticky left-[90px] bg-gray-900 z-20 w-[80px] min-w-[80px] shadow-[1px_0_0_0_#1f2937]">Papel</th>
+                            <th className="text-left px-3 py-3 text-gray-500 font-medium whitespace-nowrap sticky top-0 left-0 bg-gray-900 z-40 w-[90px] min-w-[90px]">Data</th>
+                            <th className="text-left px-3 py-3 text-gray-500 font-medium whitespace-nowrap sticky top-0 left-[90px] bg-gray-900 z-40 w-[80px] min-w-[80px] shadow-[1px_0_0_0_#1f2937]">Papel</th>
                             {["Classe","Ativ.","Op","Qtd","Preço","Custo","Total Op","Rateio","V.Líquido","Estoque","PM","G/P",""].map((h) => (
-                              <th key={h} className="text-left px-3 py-3 text-gray-500 font-medium whitespace-nowrap">{h}</th>
+                              <th key={h} className="text-left px-3 py-3 text-gray-500 font-medium whitespace-nowrap bg-gray-900 shadow-[0_1px_0_0_#1f2937]">{h}</th>
                             ))}
                           </tr>
                         </thead>
