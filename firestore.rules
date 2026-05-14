@@ -46,6 +46,32 @@ service cloud.firestore {
       allow delete: if isSignedIn() && (resource == null || !('userId' in resource.data) || resource.data.userId == request.auth.uid);
     }
 
+    function isValidOperacao(data) {
+      return data.data is string
+          && data.papel is string
+          && data.tipo in ["C", "V", "D"]
+          && data.qtd is number
+          && data.preco is number
+          && data.custo is number
+          && data.userId == request.auth.uid;
+    }
+
+    match /operacoes/{opId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      
+      allow create: if isSignedIn() 
+                    && request.resource.data.userId == request.auth.uid
+                    && isValidOperacao(request.resource.data);
+                    
+      allow update: if isSignedIn() 
+                    && resource.data.userId == request.auth.uid
+                    && request.resource.data.userId == request.auth.uid
+                    && isValidOperacao(request.resource.data);
+                    
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
     match /users/{userId}/config/sheets {
       allow read, write: if isOwner(userId);
     }

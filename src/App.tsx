@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { GoogleGenAI, Type } from "@google/genai";
+import IRCalculator from './components/IR/IRCalculator';
 import { 
   Upload, 
   Wallet, 
@@ -27,7 +28,8 @@ import {
   Trash2,
   FileSearch,
   AlertCircle,
-  HelpCircle
+  HelpCircle,
+  Calculator
 } from 'lucide-react';
 import { 
   AreaChart, 
@@ -173,7 +175,7 @@ const normalizeYear = (y: any) => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'entrada' | 'historico' | 'swing-trade'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'entrada' | 'historico' | 'swing-trade' | 'ir'>('dashboard');
   const [tableColumns, setTableColumns] = useState<string[]>([]);
 
   // Auth State
@@ -265,6 +267,8 @@ export default function App() {
   const [formCorretora, setFormCorretora] = useState("");
   const [formCnpj, setFormCnpj] = useState("");
   const [formDollar, setFormDollar] = useState("");
+  const [formCustos, setFormCustos] = useState("");
+  const [formRateio, setFormRateio] = useState("");
 
   const isTrade = formTransacao === "Compra" || formTransacao === "Venda";
 
@@ -580,6 +584,8 @@ export default function App() {
         "IR": finalIr,
         "Banco/Corretora": bancoCorretora,
         "CNPJ": formCnpj,
+        "Custos": isTrade && formCustos ? `R$ ${parseMoney(formCustos).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "",
+        "Rateio": isTrade && formRateio ? `R$ ${parseMoney(formRateio).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "",
         "B3 Preço Un": isUS ? `US$ ${b3PrecoUn.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : `R$ ${b3PrecoUn.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
         "B3 Preço total": b3PrecoTotal !== 0 ? `R$ ${b3PrecoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "",
         "Dollar": dollar.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
@@ -603,6 +609,8 @@ export default function App() {
       setFormYields("");
       setFormIr("");
       setFormDollar("");
+      setFormCustos("");
+      setFormRateio("");
       
       alert("Operação registrada com sucesso!");
     } catch (error) {
@@ -1609,7 +1617,7 @@ export default function App() {
 
   // Auto-fetch Swing Trade Data when tab is selected
   useEffect(() => {
-    if (activeTab === 'swing-trade' && tickers.length > 0 && !hasAttemptedSwingFetch && !isFetchingSwing) {
+    if ((activeTab === 'swing-trade' || activeTab === 'historico' || activeTab === 'dashboard') && tickers.length > 0 && !hasAttemptedSwingFetch && !isFetchingSwing) {
       setHasAttemptedSwingFetch(true);
       fetchSwingTradeBatch(tickers);
     }
@@ -1703,13 +1711,15 @@ export default function App() {
   const getPatrimonioFor = (t: string, y: string, m: string, tp: string = "All", c: string = "All") => {
     if (!allData) return 0;
     
-    // Convert target year/month to a comparable string YYYYMM
     const targetYM = (y === "All" || m === "All") ? "999999" : y + m.padStart(2, '0');
     
-    // Group by Ticker and find the last row that is <= targetYM
+    const todayDate = new Date();
+    const currentYM = `${todayDate.getFullYear()}${String(todayDate.getMonth() + 1).padStart(2, '0')}`;
+    // Se o alvo for o mês atual ou 'All', tentamos usar live data como fizemos em computedPatrimonioNum
+    const useLive = (targetYM === currentYM || targetYM === "999999") && Object.keys(swingTradeData).length > 0;
+
     const latestValues = new Map<string, number>();
     
-    // Important: allData must be sorted by date (already handled in processData)
     allData.forEach(row => {
       const ticker = row["Ticker"];
       if (!ticker || ticker.toUpperCase() === "MONTH CLOSING" || ticker.toUpperCase() === "TOTAL") return;
@@ -1739,16 +1749,40 @@ export default function App() {
       }
       
       if (rowYM && rowYM <= targetYM) {
-        // Obter o valor de mercado (B3 Preço total) ou custo como último recurso
-        const b3TotalStr = row["B3 Preço total"];
-        const saldoCustoStr = row["Saldo Custo"];
-        
-        if (b3TotalStr && b3TotalStr.trim() !== "" && b3TotalStr !== "NOT FOUND") {
-          // Quando encontramos um preço de mercado, ele reflete o valor REAL do saldo naquele momento
-          latestValues.set(ticker, parseMoney(b3TotalStr));
-        } else if (saldoCustoStr && saldoCustoStr.trim() !== "" && !latestValues.has(ticker)) {
-          // Só usamos custo se ainda não tivermos nenhum valor registrado para esse ticker
-          latestValues.set(ticker, parseMoney(saldoCustoStr));
+        if (useLive && swingTradeData[ticker] && swingTradeData[ticker].currentPrice > 0) {
+            let unStr = String(row["Saldo de Un"] || "");
+            let unNum = 0;
+            if (unStr) {
+               if (unStr.includes('R$') || unStr.includes('US$')) unNum = parseFloat(unStr.replace(/[^\d,-]/g,"").replace(",","."));
+               else if (unStr.includes('.') && unStr.includes(',')) unNum = parseFloat(unStr.replace(/\./g, "").replace(",", "."));
+               else if (unStr.includes(',')) unNum = parseFloat(unStr.replace(",", "."));
+               else unNum = parseFloat(unStr);
+               if (isNaN(unNum)) unNum = 0;
+            }
+            let b3Total = unNum * swingTradeData[ticker].currentPrice;
+            if (corr.toUpperCase().includes("NOMAD")) {
+               let dVal = 1;
+               const dollarStr = String(row["Dollar"] || "");
+               if (dollarStr) {
+                 let dStr = dollarStr;
+                 if (dStr.includes('R$') || dStr.includes('$')) dStr = dStr.replace(/[^\d,-]/g,"").replace(",",".");
+                 else if (dStr.includes('.') && dStr.includes(',')) dStr = dStr.replace(/\./g, "").replace(",", ".");
+                 else if (dStr.includes(',')) dStr = dStr.replace(",", ".");
+                 dVal = parseFloat(dStr);
+                 if (isNaN(dVal) || dVal <= 0) dVal = 1;
+               }
+               b3Total *= dVal;
+            }
+            latestValues.set(ticker, b3Total);
+        } else {
+            const b3TotalStr = row["B3 Preço total"];
+            const saldoCustoStr = row["Saldo Custo"];
+            
+            if (b3TotalStr && b3TotalStr.trim() !== "" && b3TotalStr !== "NOT FOUND") {
+              latestValues.set(ticker, parseMoney(b3TotalStr));
+            } else if (saldoCustoStr && saldoCustoStr.trim() !== "" && !latestValues.has(ticker)) {
+              latestValues.set(ticker, parseMoney(saldoCustoStr));
+            }
         }
       }
     });
@@ -1784,34 +1818,69 @@ export default function App() {
     return ((curVal / janVal) - 1) * 100;
   }, [allData, filterTicker, filterYear, filterMonth]);
 
-  const computedPatrimonio = useMemo(() => {
-    if (!allData || allData.length === 0) return "R$ 0,00";
+  const computedPatrimonioNum = useMemo(() => {
+    if (!allData || allData.length === 0) return 0;
     const tickerMap = new Map<string, number>();
     
-    // allData is chronological (sorted in processData)
     allData.forEach(row => {
       const ticker = String(row["Ticker"] || "").trim().toUpperCase();
       if (!ticker || ticker === "MONTH CLOSING" || ticker === "TOTAL") return;
       
-      // If we are looking for a specific ticker, skip others.
       if (filterTicker !== "All" && ticker !== filterTicker.toUpperCase()) return;
 
-      const b3Raw = String(row["B3 Preço total"] || "").trim();
-      const scRaw = String(row["Saldo Custo"] || "").trim();
+      const info = swingTradeData[ticker];
       
-      // We look for the latest occurrence of a non-empty B3 total.
-      if (b3Raw !== "" && b3Raw !== "NOT FOUND" && b3Raw !== "0" && b3Raw !== "0,00") {
-        tickerMap.set(ticker, parseMoney(b3Raw));
-      } else if (scRaw !== "" && scRaw !== "0" && scRaw !== "0,00" && !tickerMap.has(ticker)) {
-        // Fallback to Cost only if we haven't seen a B3 value yet.
-        tickerMap.set(ticker, parseMoney(scRaw));
+      if (info && info.currentPrice > 0) {
+          let unStr = String(row["Saldo de Un"] || "");
+          let unNum = 0;
+          if (unStr) {
+            if (unStr.includes('R$') || unStr.includes('US$')) {
+              unNum = parseFloat(unStr.replace(/[^\d,-]/g,"").replace(",","."));
+            } else if (unStr.includes('.') && unStr.includes(',')) {
+              unStr = unStr.replace(/\./g, "").replace(",", ".");
+              unNum = parseFloat(unStr);
+            } else if (unStr.includes(',')) {
+              unStr = unStr.replace(",", ".");
+              unNum = parseFloat(unStr);
+            } else {
+              unNum = parseFloat(unStr);
+            }
+            if (isNaN(unNum)) unNum = 0;
+          }
+          const corretora = String(row["Banco/Corretora"] || "").toUpperCase();
+          let dVal = 1;
+          const dollarStr = String(row["Dollar"] || "");
+          if (dollarStr) {
+            let dStr = dollarStr;
+            if (dStr.includes('R$') || dStr.includes('$')) dStr = dStr.replace(/[^\d,-]/g,"").replace(",",".");
+            else if (dStr.includes('.') && dStr.includes(',')) dStr = dStr.replace(/\./g, "").replace(",", ".");
+            else if (dStr.includes(',')) dStr = dStr.replace(",", ".");
+            dVal = parseFloat(dStr);
+            if (isNaN(dVal) || dVal <= 0) dVal = 1;
+          }
+          let b3Total = unNum * info.currentPrice;
+          if (corretora.includes("NOMAD")) b3Total *= dVal;
+          tickerMap.set(ticker, b3Total);
+      } else {
+          const b3Raw = String(row["B3 Preço total"] || "").trim();
+          const scRaw = String(row["Saldo Custo"] || "").trim();
+          
+          if (b3Raw !== "" && b3Raw !== "NOT FOUND" && b3Raw !== "0" && b3Raw !== "0,00") {
+            tickerMap.set(ticker, parseMoney(b3Raw));
+          } else if (scRaw !== "" && scRaw !== "0" && scRaw !== "0,00" && !tickerMap.has(ticker)) {
+            tickerMap.set(ticker, parseMoney(scRaw));
+          }
       }
     });
 
     let total = 0;
     tickerMap.forEach(v => total += v);
-    return `R$ ${total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  }, [allData, filterTicker]);
+    return total;
+  }, [allData, filterTicker, swingTradeData]);
+
+  const computedPatrimonio = useMemo(() => {
+    return `R$ ${computedPatrimonioNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }, [computedPatrimonioNum]);
 
   const computedYields = useMemo(() => {
     if (!allData || allData.length === 0) return "R$ 0,00";
@@ -1865,10 +1934,44 @@ export default function App() {
       const t = String(row["Ticker"] || "").trim().toUpperCase();
       if (!t || t === "MONTH CLOSING" || t === "TOTAL") return;
 
-      const b3TotalStr = row["B3 Preço total"];
-      if (b3TotalStr && b3TotalStr !== "NOT FOUND") {
-         const val = parseMoney(b3TotalStr);
-         if (val > 0) latestB3Total.set(t, val); 
+      if (swingTradeData[t] && swingTradeData[t].currentPrice > 0) {
+          let unStr = String(row["Saldo de Un"] || "");
+          let unNum = 0;
+          if (unStr) {
+             if (unStr.includes('R$') || unStr.includes('US$')) unNum = parseFloat(unStr.replace(/[^\d,-]/g,"").replace(",","."));
+             else if (unStr.includes('.') && unStr.includes(',')) unNum = parseFloat(unStr.replace(/\./g, "").replace(",", "."));
+             else if (unStr.includes(',')) unNum = parseFloat(unStr.replace(",", "."));
+             else unNum = parseFloat(unStr);
+             if (isNaN(unNum)) unNum = 0;
+          }
+          const broker = String(row["Banco/Corretora"] || "Não Especificado");
+          let b3Total = unNum * swingTradeData[t].currentPrice;
+          if (broker.toUpperCase().includes("NOMAD")) {
+             let dVal = 1;
+             const dollarStr = String(row["Dollar"] || "");
+             if (dollarStr) {
+               let dStr = dollarStr;
+               if (dStr.includes('R$') || dStr.includes('$')) dStr = dStr.replace(/[^\d,-]/g,"").replace(",",".");
+               else if (dStr.includes('.') && dStr.includes(',')) dStr = dStr.replace(/\./g, "").replace(",", ".");
+               else if (dStr.includes(',')) dStr = dStr.replace(",", ".");
+               dVal = parseFloat(dStr);
+               if (isNaN(dVal) || dVal <= 0) dVal = 1;
+             }
+             b3Total *= dVal;
+          }
+          if (b3Total > 0) latestB3Total.set(t, b3Total);
+      } else {
+          const b3TotalStr = row["B3 Preço total"];
+          const scRaw = String(row["Saldo Custo"] || "").trim();
+          let finalVal = 0;
+          if (b3TotalStr && b3TotalStr !== "NOT FOUND") {
+             finalVal = parseMoney(b3TotalStr);
+          } else if (scRaw !== "" && scRaw !== "0" && scRaw !== "0,00" && !latestB3Total.has(t)) {
+             finalVal = parseMoney(scRaw);
+          } else if (latestB3Total.has(t)) {
+             finalVal = latestB3Total.get(t)!;
+          }
+          if (finalVal > 0) latestB3Total.set(t, finalVal); 
       }
 
       const dStr = String(row["Data"] || "").trim();
@@ -1925,7 +2028,7 @@ export default function App() {
       data,
       types: Array.from(foundTypes)
     };
-  }, [allData, selectedYieldYear]);
+  }, [allData, selectedYieldYear, swingTradeData]);
 
   const YIELD_COLORS: Record<string, string> = {
     'DIVIDENDOS': '#3B82F6',
@@ -1939,6 +2042,10 @@ export default function App() {
     if (!allData) return [];
     const targetYM = (filterYear === "All" || filterMonth === "All") ? "999999" : filterYear + filterMonth;
     
+    const todayDate = new Date();
+    const currentYM = `${todayDate.getFullYear()}${String(todayDate.getMonth() + 1).padStart(2, '0')}`;
+    const useLive = (targetYM === currentYM || targetYM === "999999") && Object.keys(swingTradeData).length > 0;
+
     // Para alocação, pegamos o último valor de cada ticker até a data alvo
     const latestTickerInfo = new Map<string, { value: number, type: string, broker: string }>();
     
@@ -1960,13 +2067,57 @@ export default function App() {
       }
       
       if (rowYM && rowYM <= targetYM) {
-        const b3TotalStr = row["B3 Preço total"];
-        if (b3TotalStr && b3TotalStr !== "NOT FOUND") {
-          latestTickerInfo.set(ticker, {
-            value: parseMoney(b3TotalStr),
-            type: String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "Não Especificado"),
-            broker: String(row["Banco/Corretora"] || "Não Especificado")
-          });
+        if (useLive && swingTradeData[ticker] && swingTradeData[ticker].currentPrice > 0) {
+            let unStr = String(row["Saldo de Un"] || "");
+            let unNum = 0;
+            if (unStr) {
+               if (unStr.includes('R$') || unStr.includes('US$')) unNum = parseFloat(unStr.replace(/[^\d,-]/g,"").replace(",","."));
+               else if (unStr.includes('.') && unStr.includes(',')) unNum = parseFloat(unStr.replace(/\./g, "").replace(",", "."));
+               else if (unStr.includes(',')) unNum = parseFloat(unStr.replace(",", "."));
+               else unNum = parseFloat(unStr);
+               if (isNaN(unNum)) unNum = 0;
+            }
+            const broker = String(row["Banco/Corretora"] || "Não Especificado");
+            let b3Total = unNum * swingTradeData[ticker].currentPrice;
+            if (broker.toUpperCase().includes("NOMAD")) {
+               let dVal = 1;
+               const dollarStr = String(row["Dollar"] || "");
+               if (dollarStr) {
+                 let dStr = dollarStr;
+                 if (dStr.includes('R$') || dStr.includes('$')) dStr = dStr.replace(/[^\d,-]/g,"").replace(",",".");
+                 else if (dStr.includes('.') && dStr.includes(',')) dStr = dStr.replace(/\./g, "").replace(",", ".");
+                 else if (dStr.includes(',')) dStr = dStr.replace(",", ".");
+                 dVal = parseFloat(dStr);
+                 if (isNaN(dVal) || dVal <= 0) dVal = 1;
+               }
+               b3Total *= dVal;
+            }
+            latestTickerInfo.set(ticker, {
+              value: b3Total,
+              type: String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "Não Especificado"),
+              broker: broker
+            });
+        } else {
+            const b3TotalStr = row["B3 Preço total"];
+            const scRaw = String(row["Saldo Custo"] || "").trim();
+            let finalVal = 0;
+            
+            if (b3TotalStr && b3TotalStr.trim() !== "" && b3TotalStr !== "NOT FOUND") {
+              finalVal = parseMoney(b3TotalStr);
+            } else if (scRaw !== "" && scRaw !== "0" && scRaw !== "0,00" && !latestTickerInfo.has(ticker)) {
+              finalVal = parseMoney(scRaw);
+            } else if (latestTickerInfo.has(ticker)) {
+              // Mantém o valor anterior se for não tiver novo valor
+              finalVal = latestTickerInfo.get(ticker)!.value;
+            }
+            
+            if (finalVal > 0) {
+              latestTickerInfo.set(ticker, {
+                value: finalVal,
+                type: String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "Não Especificado"),
+                broker: String(row["Banco/Corretora"] || "Não Especificado")
+              });
+            }
         }
       }
     });
@@ -2000,6 +2151,13 @@ export default function App() {
 
     const uniqueDates = Array.from(new Set(relevantData.map(row => row["Data"]))).filter(Boolean) as string[];
     
+    // Append today if we have live data
+    const todayDate = new Date();
+    const todayStr = `${String(todayDate.getDate()).padStart(2, '0')}/${String(todayDate.getMonth() + 1).padStart(2, '0')}/${todayDate.getFullYear()}`;
+    if (!uniqueDates.includes(todayStr) && Object.keys(swingTradeData).length > 0) {
+      uniqueDates.push(todayStr);
+    }
+    
     // Ordenar cronologicamente para o gráfico
     uniqueDates.sort((a, b) => {
       const partsA = a.split('/');
@@ -2009,6 +2167,11 @@ export default function App() {
     });
 
     return uniqueDates.map(dateStr => {
+      // Se for a última data e for "Hoje" (ou a data atual real) e temos swingTradeData
+      if (dateStr === todayStr && Object.keys(swingTradeData).length > 0) {
+         return { Data: dateStr, "B3 Preço Total": computedPatrimonioNum };
+      }
+
       const parts = dateStr.split('/');
       const targetDateStr = parts.length === 3 ? `${parts[2]}${parts[1]}${parts[0]}` : "";
       
@@ -2027,8 +2190,11 @@ export default function App() {
           const rowDateStr = `${rParts[2]}${rParts[1]}${rParts[0]}`;
           if (rowDateStr <= targetDateStr) {
              const b3TotalStr = row["B3 Preço total"];
+             const scRaw = String(row["Saldo Custo"] || "").trim();
              if (b3TotalStr && String(b3TotalStr).trim() !== "" && b3TotalStr !== "NOT FOUND") {
                latestValues.set(ticker, parseMoney(b3TotalStr));
+             } else if (scRaw !== "" && scRaw !== "0" && scRaw !== "0,00" && !latestValues.has(ticker)) {
+               latestValues.set(ticker, parseMoney(scRaw));
              }
           }
         }
@@ -2038,7 +2204,7 @@ export default function App() {
       latestValues.forEach(val => sum += val);
       return { Data: dateStr, "B3 Preço Total": sum };
     });
-  }, [allData, filterTicker]);
+  }, [allData, filterTicker, swingTradeData, computedPatrimonioNum]);
 
   return (
     <div className="relative min-h-screen text-slate-100 flex justify-center bg-transparent">
@@ -2156,6 +2322,18 @@ export default function App() {
         >
           <Activity className="w-5 h-5 text-[var(--color-accent-teal)]" />
           <span className="hidden sm:inline text-[var(--color-accent-teal)]">Swing Trade</span>
+        </button>
+        <div className="w-px h-6 bg-[var(--color-accent-teal)]/20 mx-1"></div>
+        <button 
+          onClick={() => setActiveTab('ir')}
+          className={`flex items-center gap-2 px-6 py-3 rounded-full text-sm font-bold transition-all ${
+            activeTab === 'ir' 
+              ? 'bg-[var(--color-accent-violet)]/20 text-[var(--color-accent-teal)] shadow-[inset_0_0_12px_rgba(167,139,250,0.2)] border border-[var(--color-accent-violet)]/30' 
+              : 'text-[var(--color-accent-teal)] hover:bg-white/5 border border-transparent'
+          }`}
+        >
+          <Calculator className="w-5 h-5 text-[var(--color-accent-teal)]" />
+          <span className="hidden sm:inline text-[var(--color-accent-teal)]">Calculadora IR</span>
         </button>
         <div className="w-px h-6 bg-[var(--color-accent-teal)]/20 mx-1"></div>
         <button 
@@ -2574,31 +2752,51 @@ export default function App() {
                 <div className="glass-panel p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] flex flex-col gap-4 sm:gap-6 relative overflow-hidden h-full lg:col-span-2 z-20">
                   <div className="absolute -top-12 -right-12 w-32 h-32 bg-[var(--color-accent-violet)] rounded-full blur-[60px] opacity-30 pointer-events-none"></div>
                   
-                  <div className="flex items-center gap-3 w-full relative z-10">
+                  <div className="flex items-center justify-between w-full relative z-10">
                     <span className="text-xs tracking-wide uppercase sm:text-sm font-medium text-slate-300">Portfólio</span>
+                    <button
+                      onClick={() => fetchSwingTradeBatch(tickers)}
+                      disabled={isFetchingSwing || tickers.length === 0}
+                      className="px-3 py-1.5 bg-[var(--color-accent-teal)]/10 hover:bg-[var(--color-accent-teal)]/20 border border-[var(--color-accent-teal)]/30 text-[var(--color-accent-teal)] rounded-xl font-bold transition-all flex items-center gap-2 disabled:opacity-50 text-[10px] uppercase tracking-widest"
+                      title="Atualizar Valores Exatos na B3 Média"
+                    >
+                      {isFetchingSwing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                      Atualizar
+                    </button>
                   </div>
                   
                   <div className="z-10">
-                    <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight mb-2 truncate">
-                      {computedPatrimonio}
+                    <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight mb-2 truncate flex items-center gap-3">
+                      {isFetchingSwing ? (
+                        <>
+                          <Loader2 className="w-8 h-8 sm:w-10 sm:h-10 animate-spin text-[var(--color-accent-teal)]" />
+                          <span className="text-2xl sm:text-3xl text-slate-400">Calculando...</span>
+                        </>
+                      ) : (
+                        computedPatrimonio
+                      )}
                     </h2>
                   </div>
                 </div>
 
                 {/* Yields Card */}
-                <div className="glass-panel p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] flex flex-col gap-4 sm:gap-6 relative overflow-hidden h-full lg:col-span-2 z-10">
-                  <div className="absolute -top-12 -right-12 w-32 h-32 bg-[var(--color-accent-teal)] rounded-full blur-[60px] opacity-20 pointer-events-none"></div>
+                <div className="glass-panel p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] flex flex-col justify-between relative overflow-hidden h-full lg:col-span-2 border-t-2 border-t-[var(--color-accent-teal)]/20">
+                  <div className="absolute -bottom-10 -right-10 w-24 h-24 bg-[var(--color-accent-teal)]/50 rounded-full blur-[50px] opacity-20 pointer-events-none"></div>
                   
-                  <div className="flex items-center gap-3 w-full relative z-10">
-                    <div className="p-2 bg-white/10 rounded-xl hidden sm:block">
-                      <Coins className="w-5 h-5 text-[var(--color-accent-teal)]" />
-                    </div>
+                  <div className="flex items-center gap-3 w-full relative z-10 mb-2">
                     <span className="text-xs tracking-wide uppercase sm:text-sm font-medium text-slate-300">Yields</span>
                   </div>
                   
-                  <div className="z-10">
-                    <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight mb-2 truncate text-[var(--color-accent-teal)]">
-                      {computedYields}
+                  <div className="z-10 min-h-[40px] flex items-end mt-2">
+                    <h2 className="text-2xl sm:text-4xl font-bold tracking-tight truncate text-[var(--color-accent-teal)] flex items-center gap-3">
+                      {isFetchingSwing ? (
+                        <>
+                          <Loader2 className="w-6 h-6 sm:w-8 sm:h-8 animate-spin text-[var(--color-accent-teal)]" />
+                          <span className="text-xl sm:text-2xl text-slate-400">...</span>
+                        </>
+                      ) : (
+                        computedYields
+                      )}
                     </h2>
                   </div>
                 </div>
@@ -2610,8 +2808,13 @@ export default function App() {
                     <span className="text-xs tracking-wide uppercase sm:text-sm font-medium text-slate-300">% Var Mês</span>
                   </div>
                   <div className="z-10 min-h-[40px] flex items-end mt-2">
-                    <h2 className={`text-2xl sm:text-4xl font-bold tracking-tight ${computedPatrimonioVarMes === null ? 'text-slate-500' : computedPatrimonioVarMes >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {computedPatrimonioVarMes === null ? "---" : `${computedPatrimonioVarMes >= 0 ? "+" : ""}${computedPatrimonioVarMes.toFixed(2)}%`}
+                    <h2 className={`text-2xl sm:text-4xl font-bold tracking-tight flex items-center gap-3 ${computedPatrimonioVarMes === null && !isFetchingSwing ? 'text-slate-500' : (computedPatrimonioVarMes ?? 0) >= 0 && !isFetchingSwing ? 'text-emerald-400' : isFetchingSwing ? 'text-slate-400' : 'text-rose-400'}`}>
+                      {isFetchingSwing ? (
+                        <>
+                          <Loader2 className="w-6 h-6 sm:w-8 sm:h-8 animate-spin text-slate-400" />
+                          <span className="text-xl sm:text-2xl">...</span>
+                        </>
+                      ) : computedPatrimonioVarMes === null ? "---" : `${computedPatrimonioVarMes >= 0 ? "+" : ""}${computedPatrimonioVarMes.toFixed(2)}%`}
                     </h2>
                   </div>
                 </div>
@@ -2623,8 +2826,13 @@ export default function App() {
                     <span className="text-xs tracking-wide uppercase sm:text-sm font-medium text-slate-300">% Var YTD</span>
                   </div>
                   <div className="z-10 min-h-[40px] flex items-end mt-2">
-                    <h2 className={`text-2xl sm:text-4xl font-bold tracking-tight ${computedPatrimonioVarYtd === null ? 'text-slate-500' : computedPatrimonioVarYtd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {computedPatrimonioVarYtd === null ? "---" : `${computedPatrimonioVarYtd >= 0 ? "+" : ""}${computedPatrimonioVarYtd.toFixed(2)}%`}
+                    <h2 className={`text-2xl sm:text-4xl font-bold tracking-tight flex items-center gap-3 ${computedPatrimonioVarYtd === null && !isFetchingSwing ? 'text-slate-500' : (computedPatrimonioVarYtd ?? 0) >= 0 && !isFetchingSwing ? 'text-emerald-400' : isFetchingSwing ? 'text-slate-400' : 'text-rose-400'}`}>
+                      {isFetchingSwing ? (
+                        <>
+                          <Loader2 className="w-6 h-6 sm:w-8 sm:h-8 animate-spin text-slate-400" />
+                          <span className="text-xl sm:text-2xl">...</span>
+                        </>
+                      ) : computedPatrimonioVarYtd === null ? "---" : `${computedPatrimonioVarYtd >= 0 ? "+" : ""}${computedPatrimonioVarYtd.toFixed(2)}%`}
                     </h2>
                   </div>
                 </div>
@@ -2891,6 +3099,14 @@ export default function App() {
                    <div className="flex flex-col gap-4">
                      <div className="flex justify-between items-center mb-2">
                        <h3 className="font-semibold text-lg">Histórico</h3>
+                       <button
+                         onClick={() => fetchSwingTradeBatch(tickers)}
+                         disabled={isFetchingSwing || tickers.length === 0}
+                         className="px-4 py-2 bg-[var(--color-accent-teal)]/10 hover:bg-[var(--color-accent-teal)]/20 border border-[var(--color-accent-teal)]/30 text-[var(--color-accent-teal)] rounded-xl font-bold transition-all flex items-center gap-2 disabled:opacity-50 text-xs"
+                       >
+                         {isFetchingSwing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                         {isFetchingSwing ? 'Atualizando...' : 'Atualizar Cotações'}
+                       </button>
                      </div>
                      
                      <div className="glass-panel p-2 rounded-[24px]">
@@ -2909,11 +3125,94 @@ export default function App() {
                            <tbody className="divide-y divide-white/5">
                              {[...(filteredData || [])].reverse().map((row, index) => (
                                <tr key={index} className="hover:bg-white/5 transition-colors group">
-                                 {REQUIRED_COLUMNS.map((colKey, j) => (
-                                   <td key={j} className="p-4 text-slate-300 font-medium">
-                                     {row[colKey] ? String(row[colKey]) : '-'}
-                                   </td>
-                                 ))}
+                                 {REQUIRED_COLUMNS.map((colKey, j) => {
+                                   if (colKey === "B3 Preço Un") {
+                                     const ticker = row["Ticker"];
+                                     const info = ticker ? swingTradeData[ticker] : null;
+                                     const isUS = String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "").trim().toUpperCase() === "US STOCKS";
+                                     return (
+                                       <td key={j} className="p-4 text-slate-300 font-medium">
+                                         {isFetchingSwing && !info ? (
+                                           <div className="flex items-center gap-2 text-white italic">
+                                             <Loader2 className="w-3 h-3 animate-spin whitespace-nowrap" />
+                                             <span className="whitespace-nowrap">Buscando...</span>
+                                            </div>
+                                         ) : info && info.currentPrice > 0 ? (
+                                           <span className="font-mono text-white whitespace-nowrap">
+                                             {isUS ? 'US$' : 'R$'} {info.currentPrice.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                           </span>
+                                         ) : info && info.currentPrice === 0 ? (
+                                           <span className="text-rose-500 font-bold uppercase text-[10px] whitespace-nowrap">NOT FOUND</span>
+                                         ) : (
+                                           <span className="whitespace-nowrap">{row[colKey] ? String(row[colKey]) : '-'}</span>
+                                         )}
+                                       </td>
+                                     );
+                                   }
+                                   if (colKey === "B3 Preço total") {
+                                     const ticker = row["Ticker"];
+                                     const info = ticker ? swingTradeData[ticker] : null;
+                                     const isUS = String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "").trim().toUpperCase() === "US STOCKS";
+                                     if (info && info.currentPrice > 0) {
+                                       let unStr = String(row["Saldo de Un"] || "");
+                                       let unNum = 0;
+                                       if (unStr) {
+                                          if (unStr.includes('R$') || unStr.includes('US$')) {
+                                            unNum = parseFloat(unStr.replace(/[^\d,-]/g,"").replace(",","."));
+                                          } else if (unStr.includes('.') && unStr.includes(',')) {
+                                            unStr = unStr.replace(/\./g, "").replace(",", ".");
+                                            unNum = parseFloat(unStr);
+                                          } else if (unStr.includes(',')) {
+                                            unStr = unStr.replace(",", ".");
+                                            unNum = parseFloat(unStr);
+                                          } else {
+                                            unNum = parseFloat(unStr);
+                                          }
+                                          if (isNaN(unNum)) unNum = 0;
+                                       }
+                                       const corretora = String(row["Banco/Corretora"] || "").toUpperCase();
+                                       let dVal = 1;
+                                       const dollarStr = String(row["Dollar"] || "");
+                                       if (dollarStr) {
+                                         let dStr = dollarStr;
+                                         if (dStr.includes('R$') || dStr.includes('$')) dStr = dStr.replace(/[^\d,-]/g,"").replace(",",".");
+                                         else if (dStr.includes('.') && dStr.includes(',')) dStr = dStr.replace(/\./g, "").replace(",", ".");
+                                         else if (dStr.includes(',')) dStr = dStr.replace(",", ".");
+                                         dVal = parseFloat(dStr);
+                                         if (isNaN(dVal) || dVal <= 0) dVal = 1;
+                                       }
+                                       let b3Total = unNum * info.currentPrice;
+                                       if (corretora.includes("NOMAD")) b3Total *= dVal;
+                                       return (
+                                         <td key={j} className="p-4 text-slate-300 font-medium">
+                                           <span className="font-mono text-white whitespace-nowrap">
+                                             R$ {b3Total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                           </span>
+                                         </td>
+                                       );
+                                     } else if (info && info.currentPrice === 0) {
+                                         return (
+                                           <td key={j} className="p-4 text-slate-300 font-medium">
+                                             <span className="text-rose-500 font-bold uppercase text-[10px] whitespace-nowrap">NOT FOUND</span>
+                                           </td>
+                                         );
+                                     } else if (isFetchingSwing && !info) {
+                                         return (
+                                           <td key={j} className="p-4 text-slate-300 font-medium">
+                                             <div className="flex items-center gap-2 text-white italic">
+                                               <Loader2 className="w-3 h-3 animate-spin whitespace-nowrap" />
+                                               <span className="whitespace-nowrap">Calculando...</span>
+                                             </div>
+                                           </td>
+                                         );
+                                     }
+                                   }
+                                   return (
+                                     <td key={j} className="p-4 text-slate-300 font-medium">
+                                       {row[colKey] ? String(row[colKey]) : '-'}
+                                     </td>
+                                   );
+                                 })}
                                  <td className="p-4 text-slate-300 font-medium transition-colors text-center">
                                    <button 
                                      onClick={() => setRowToDelete(row)}
@@ -3049,6 +3348,16 @@ export default function App() {
                   </table>
                 </div>
               </div>
+            </motion.div>
+          ) : activeTab === 'ir' ? (
+            <motion.div 
+              key="ir-calculator"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="flex flex-col gap-6 w-full"
+            >
+              <IRCalculator mainRows={allData} userId={user?.uid} />
             </motion.div>
           ) : (
             <motion.div 
@@ -3227,6 +3536,30 @@ export default function App() {
                             )}
 
                             <div className="flex flex-col gap-2">
+                              <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Taxas/Custos (R$)</label>
+                              <input 
+                                type="text" 
+                                inputMode="decimal"
+                                value={formCustos}
+                                onChange={handleCurrencyChange(setFormCustos, "R$ ")}
+                                placeholder="R$ 0,00" 
+                                className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
+                              />
+                            </div>
+
+                            <div className="flex flex-col gap-2">
+                              <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">Rateio/IR (R$)</label>
+                              <input 
+                                type="text" 
+                                inputMode="decimal"
+                                value={formRateio}
+                                onChange={handleCurrencyChange(setFormRateio, "R$ ")}
+                                placeholder="R$ 0,00" 
+                                className="bg-white/5 backdrop-blur-md border border-white/10 rounded-xl p-3 text-[#2dd4bf] font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--color-accent-cyan)] outline-none" 
+                              />
+                            </div>
+
+                            <div className="flex flex-col gap-2 md:col-span-2">
                               <label className="text-[10px] sm:text-xs font-bold text-white uppercase tracking-widest">
                                 {formTransacao === "Venda" ? "Total da Venda (R$)" : "Total do Custo (R$)"}
                               </label>
@@ -3364,6 +3697,8 @@ export default function App() {
                         setFormCorretora("");
                         setFormCnpj("");
                         setFormPrecoUn("");
+                        setFormCustos("");
+                        setFormRateio("");
                       }}
                       className="px-6 py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-2xl font-bold text-[var(--color-accent-teal)] transition-all flex justify-center items-center backdrop-blur-md cursor-pointer outline-none"
                       title="Limpar Entrada"
