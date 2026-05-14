@@ -726,7 +726,7 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
                         <thead className="sticky top-0 z-30">
                           <tr className="border-b border-gray-800">
                             <th className="text-left px-3 py-3 text-gray-500 font-medium whitespace-nowrap sticky top-0 left-0 bg-gray-900 z-40 w-[90px] min-w-[90px]">Data</th>
-                            <th className="text-left px-3 py-3 text-gray-500 font-medium whitespace-nowrap sticky top-0 left-[90px] bg-gray-900 z-40 w-[80px] min-w-[80px] shadow-[1px_0_0_0_#1f2937]">Papel</th>
+                            <th className="text-left px-3 py-3 text-gray-500 font-medium whitespace-nowrap sticky top-0 left-[90px] bg-gray-900 z-40 w-[80px] min-w-[80px] shadow-[1px_0_0_0_#1f2937]">Ticker</th>
                             {["Classe","Ativ.","Op","Qtd","Preço","Custo","Total Op","Rateio","V.Líquido","Estoque","PM","G/P",""].map((h) => (
                               <th key={h} className="text-left px-3 py-3 text-gray-500 font-medium whitespace-nowrap bg-gray-900 shadow-[0_1px_0_0_#1f2937]">{h}</th>
                             ))}
@@ -871,7 +871,7 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-gray-800">
-                        {["Papel","Estoque","PM (R$)","Custo total (R$)","Tipo"].map((h) => (
+                        {["Ticker","Estoque","PM (R$)","Custo total (R$)","Tipo"].map((h) => (
                           <th key={h} className="text-left px-4 py-3 text-gray-500 font-medium">{h}</th>
                         ))}
                       </tr>
