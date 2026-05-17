@@ -3009,18 +3009,7 @@ export default function App() {
                           height={60}
                           interval={0}
                         />
-                        <YAxis 
-                          stroke="rgba(255,255,255,0.5)" 
-                          tick={{fill: 'rgba(255,255,255,0.7)', fontSize: 12}}
-                          tickFormatter={(tick) => `${Number(tick)}%`}
-                          width={60}
-                          domain={[0, (dataMax: number) => {
-                            const rounded = Math.ceil(dataMax);
-                            // Set a sensible minimum max value but let it grow automatically
-                            return rounded > 10 ? rounded : 10;
-                          }]}
-                          allowDataOverflow={true}
-                        />
+                        <YAxis hide={true} />
                         <Tooltip
                           contentStyle={{ 
                             backgroundColor: 'rgba(13, 27, 42, 0.9)', 
