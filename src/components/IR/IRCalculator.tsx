@@ -32,6 +32,9 @@ import {
   ChevronDown,
   ChevronUp,
   RefreshCw,
+  Check,
+  ExternalLink,
+  Info,
 } from "lucide-react";
 
 // ─── TIPOS ───────────────────────────────────────────────────────────────────
@@ -399,6 +402,9 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
   // Prejuízo anterior
   const [prejInicial, setPrejInicial] = useState({ st: 0, dt: 0, fii: 0 });
 
+  // Pagamentos DARF por mês
+  const [pagos, setPagos] = useState<Record<string, { id?: string; dataPagamento?: string }>>({});
+
   // CSV import
   const [csvText, setCsvText] = useState("");
   const [importMsg, setImportMsg] = useState("");
@@ -548,6 +554,24 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
     return unsub;
   }, [userId]);
 
+  // ── Firebase listener (Pagamentos) ──
+  useEffect(() => {
+    if (!userId) return;
+    const q = query(
+      collection(db, "pagamentos_darf"),
+      where("userId", "==", userId)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const mapa: Record<string, { id?: string; dataPagamento?: string }> = {};
+      snap.docs.forEach((d) => {
+        const data = d.data();
+        mapa[data.mesKey] = { id: d.id, dataPagamento: data.dataPagamento };
+      });
+      setPagos(mapa);
+    });
+    return unsub;
+  }, [userId]);
+
   // ── Dados calculados ──
   const ops      = useMemo(() => processarOperacoes(rawOps), [rawOps]);
   
@@ -566,6 +590,38 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
   const totalPerda = resumo.reduce((a, m) => a + m.perdaST + m.perdaDT + m.perdaFII, 0);
   const totalIR    = resumo.reduce((a, m) => a + m.irTotal, 0);
   const saldoNet   = totalGanho + totalPerda;
+
+  const totalIRDevido = useMemo(() => {
+    return resumo.reduce((a, m) => {
+      const isPaid = !!pagos[m.mesKey];
+      return a + (isPaid ? 0 : m.irTotal);
+    }, 0);
+  }, [resumo, pagos]);
+
+  const totalIRPago = useMemo(() => {
+    return resumo.reduce((a, m) => {
+      const isPaid = !!pagos[m.mesKey];
+      return a + (isPaid ? m.irTotal : 0);
+    }, 0);
+  }, [resumo, pagos]);
+
+  // ── Toggle Pagamento DARF ──
+  async function togglePago(mesKey: string, valor: number) {
+    if (!userId) return;
+    const existente = pagos[mesKey];
+    if (existente && existente.id) {
+      await deleteDoc(doc(db, "pagamentos_darf", existente.id));
+    } else {
+      await addDoc(collection(db, "pagamentos_darf"), {
+        userId,
+        mesKey,
+        pago: true,
+        valor,
+        dataPagamento: new Date().toISOString().split('T')[0],
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
 
   // ── Remover operação ──
   async function removeOp(id: string) {
@@ -645,13 +701,14 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
         </div>
 
         {/* Summary cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 mb-6">
           {[
             { label: "Ganhos Brutos",    value: fmt(totalGanho), color: "text-emerald-400" },
             { label: "Perdas Brutas",    value: fmt(totalPerda), color: "text-red-400" },
             { label: "Ganho / Perda",    value: fmt(saldoNet),   color: saldoNet >= 0 ? "text-emerald-400" : "text-red-400" },
             { label: "Prej. Acumulado",  value: fmt(resumo.length ? resumo[resumo.length-1].saldoPrejuizo : 0), color: "text-amber-400" },
-            { label: "IR Total Devido",  value: fmt(totalIR),    color: "text-white" },
+            { label: "IR Pendente",      value: fmt(totalIRDevido), color: totalIRDevido > 0 ? "text-rose-400 font-semibold" : "text-gray-400" },
+            { label: "IR Pago (DARF)",   value: fmt(totalIRPago), color: totalIRPago > 0 ? "text-emerald-400" : "text-gray-500" },
           ].map((c) => (
             <div key={c.label} className="bg-gray-900 rounded-xl p-4 border border-gray-800">
               <p className="text-xs text-gray-500 mb-1">{c.label}</p>
@@ -797,68 +854,272 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
 
             {/* ── RESUMO IR ── */}
             {activeTab === "resumo" && (
-              <div className="space-y-3">
-                {resumo.length === 0 ? (
-                  <div className="text-center text-gray-600 py-16 text-sm">Nenhuma venda registrada ainda</div>
-                ) : resumo.map((m) => (
-                  <div key={m.mesKey} className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
-                    <button
-                      onClick={() => setExpandedMonth(expandedMonth === m.mesKey ? null : m.mesKey)}
-                      className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-800/40 transition-colors"
+              <div className="space-y-4">
+                {/* Central de Orientação e Links de Pagamento */}
+                <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 space-y-4 select-none">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-blue-950/40 text-blue-400 rounded-lg border border-blue-500/20 shrink-0">
+                      <ExternalLink size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-white">Central de Pagamentos — Receita Federal</h3>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Para pagar o imposto sobre seus ganhos líquidos de renda variável (DARF), você deve preenchê-lo e emiti-lo na Receita Federal para concluir o pagamento.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Links Rápidos em Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <a
+                      href="https://sicalc.receita.fazenda.gov.br/sicalc/rapido/contribuinte"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between p-3 rounded-lg bg-gray-950 border border-gray-800 hover:border-blue-500/50 transition-all group cursor-pointer"
                     >
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-medium text-white capitalize">{m.label}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded font-medium
-                          ${m.irTotal > 0
-                            ? "bg-red-900/50 text-red-400"
-                            : "bg-emerald-900/50 text-emerald-400"}`}>
-                          {m.irTotal > 0 ? `DARF ${fmt(m.irTotal)}` : "Isento"}
+                      <div className="space-y-0.5 pr-2">
+                        <span className="text-xs font-semibold text-white block group-hover:text-blue-400 transition-colors">
+                          Sicalc Web (Preenchimento do DARF)
+                        </span>
+                        <span className="text-[10px] text-gray-500 block">
+                          Atalho direto oficial para preencher e emitir o documento de arrecadação rápida com PIX.
                         </span>
                       </div>
-                      <div className="flex items-center gap-3 text-xs text-gray-500">
-                        <span>Vendas {fmt(m.totalVendas)}</span>
-                        {expandedMonth === m.mesKey ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                      <ExternalLink size={14} className="text-gray-500 group-hover:text-blue-400 transition-colors shrink-0" />
+                    </a>
+
+                    <a
+                      href="https://cav.receita.fazenda.gov.br/autenticacao/login"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between p-3 rounded-lg bg-gray-950 border border-gray-800 hover:border-blue-500/50 transition-all group cursor-pointer"
+                    >
+                      <div className="space-y-0.5 pr-2">
+                        <span className="text-xs font-semibold text-white block group-hover:text-blue-400 transition-colors">
+                          Portal e-CAC (Receita Federal)
+                        </span>
+                        <span className="text-[10px] text-gray-500 block">
+                          Consulte sua situação fiscal integral, declarações anuais e extratos.
+                        </span>
                       </div>
-                    </button>
-                    <AnimatePresence>
-                      {expandedMonth === m.mesKey && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: "auto", opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          className="border-t border-gray-800"
-                        >
-                          <div className="px-5 py-4 space-y-2">
-                            {[
-                              ["Total de vendas (Ações ST)", fmt(m.vendasAcoesST), ""],
-                              ["Total de vendas (ETF ST)", fmt(m.etfVendas), ""],
-                              ["Resultado Swing Trade", fmt(m.ganhoST + m.perdaST), (m.ganhoST + m.perdaST) >= 0 ? "text-emerald-400" : "text-red-400"],
-                              ["Resultado Day Trade", fmt(m.ganhoDT + m.perdaDT), (m.ganhoDT + m.perdaDT) >= 0 ? "text-emerald-400" : "text-red-400"],
-                              ["Resultado FII", fmt(m.ganhoFII + m.perdaFII), (m.ganhoFII + m.perdaFII) >= 0 ? "text-emerald-400" : "text-red-400"],
-                              
-                              ["Prejuízo Compensado (Mês)", fmt(m.prejCompensado), "text-amber-400"],
-                              ["Saldo de Prejuízo (Acumulado)", fmt(m.saldoPrejuizo), "text-gray-500 italic"],
-                              
-                              ["IR Swing Trade (Ações/ETF)", fmt(m.irAcoesST + m.irEtfST), ""],
-                              ["IR Day Trade (20%)", fmt(m.irDT), ""],
-                              ["IR FII (20%)", fmt(m.irFII), ""],
-                              
-                              m.isentoST
-                                ? ["Isenção Ações ST", "Sim (Vendas ≤ 20k)", "text-emerald-400"]
-                                : ["Isenção Ações ST", "Não", "text-red-400"],
-                            ].map(([label, value, cls], i, arr) => (
-                              <div key={label} className={`flex justify-between text-sm
-                                ${i === arr.length - 1 ? "pt-2 border-t border-gray-800 font-medium text-white" : "text-white"}`}>
-                                <span className="text-gray-400">{label}</span>
-                                <span className={cls || ""}>{value}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
+                      <ExternalLink size={14} className="text-gray-500 group-hover:text-blue-400 transition-colors shrink-0" />
+                    </a>
                   </div>
-                ))}
+
+                  {/* Passo a Passo */}
+                  <div className="p-4 bg-gray-950 rounded-lg border border-gray-800/80 space-y-3">
+                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                      <Info size={13} className="text-blue-400" />
+                      Como pagar seu DARF? Passo a Passo
+                    </span>
+                    <ol className="text-xs space-y-2.5 text-gray-300">
+                      <li className="flex gap-2">
+                        <span className="text-blue-400 font-bold">1.</span>
+                        <span>
+                          <strong>Colete as informações do mês:</strong> Expanda as abas dos meses correspondentes listados abaixo. Lá você encontrará o valor do tributo, o código da receita (<strong>6015</strong>), o Período de Apuração (PA) e a Data de Vencimento ideal.
+                        </span>
+                      </li>
+                      <li className="flex gap-2">
+                        <span className="text-blue-400 font-bold">2.</span>
+                        <span>
+                          <strong>Emita o DARF no Sicalc:</strong> Clique no botão de atalho do <strong>Sicalc Web</strong> acima. Caso o servidor direto da Receita Federal esteja instável, você também pode acessar pelo <a href="https://www.gov.br/pt-br/servicos/emitir-darf-para-pagamento-de-tributos-federais" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline font-semibold inline-flex items-center gap-0.5">Portal oficial do Gov.br <ExternalLink size={10} /></a>. Lá, informe seu CPF, cidade e os dados do imposto obtidos no passo 1.
+                        </span>
+                      </li>
+                      <li className="flex gap-2">
+                        <span className="text-blue-400 font-bold">3.</span>
+                        <span>
+                          <strong>Faça o Pagamento:</strong> O DARF oficial emitido pelo Sicalc conta com um <strong>QR Code para pagamento via PIX</strong> e código de barras padrão. Você pode pagá-lo usando o aplicativo de qualquer banco de sua preferência.
+                        </span>
+                      </li>
+                      <li className="flex gap-2">
+                        <span className="text-blue-400 font-bold">4.</span>
+                        <span>
+                          <strong>Marque o Controle de Caixa:</strong> Logo após o pagamento, retorne ao aplicativo e clique no botão <span className="text-blue-400 font-semibold">Marcar como Pago</span> do respectivo mês para atualizar seus saldos pendentes no dashboard do applet.
+                        </span>
+                      </li>
+                    </ol>
+                  </div>
+                </div>
+
+                {resumo.length === 0 ? (
+                  <div className="text-center text-gray-600 py-16 text-sm">Nenhuma venda registrada ainda</div>
+                ) : resumo.map((m) => {
+                  const pg = pagos[m.mesKey];
+                  const isPaid = !!pg;
+
+                  return (
+                    <div key={m.mesKey} className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+                      <button
+                        onClick={() => setExpandedMonth(expandedMonth === m.mesKey ? null : m.mesKey)}
+                        className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-800/40 transition-colors text-left"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-medium text-white capitalize">{m.label}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded font-medium flex items-center gap-1
+                            ${m.irTotal > 0
+                              ? isPaid
+                                ? "bg-emerald-900/30 text-emerald-400 border border-emerald-500/20"
+                                : "bg-red-900/40 text-red-400 border border-red-500/20"
+                              : "bg-emerald-900/10 text-emerald-500/80"}`}>
+                            {m.irTotal > 0 ? (
+                              isPaid ? (
+                                <>
+                                  <Check size={10} strokeWidth={3} /> DARF Pago: {fmt(m.irTotal)}
+                                </>
+                              ) : (
+                                `DARF Devido: ${fmt(m.irTotal)}`
+                              )
+                            ) : "Isento"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-gray-500">
+                          <span>Vendas {fmt(m.totalVendas)}</span>
+                          {expandedMonth === m.mesKey ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                        </div>
+                      </button>
+                      <AnimatePresence>
+                        {expandedMonth === m.mesKey && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            className="border-t border-gray-800"
+                          >
+                            <div className="px-5 py-4 space-y-4">
+                              {/* Tabela de Valores do Resumo do Mês */}
+                              <div className="space-y-2">
+                                {[
+                                  ["Total de vendas (Ações ST)", fmt(m.vendasAcoesST), ""],
+                                  ["Total de vendas (ETF ST)", fmt(m.etfVendas), ""],
+                                  ["Resultado Swing Trade", fmt(m.ganhoST + m.perdaST), (m.ganhoST + m.perdaST) >= 0 ? "text-emerald-400" : "text-red-400"],
+                                  ["Resultado Day Trade", fmt(m.ganhoDT + m.perdaDT), (m.ganhoDT + m.perdaDT) >= 0 ? "text-emerald-400" : "text-red-400"],
+                                  ["Resultado FII", fmt(m.ganhoFII + m.perdaFII), (m.ganhoFII + m.perdaFII) >= 0 ? "text-emerald-400" : "text-red-400"],
+                                  
+                                  ["Prejuízo Compensado (Mês)", fmt(m.prejCompensado), "text-amber-400"],
+                                  ["Saldo de Prejuízo (Acumulado)", fmt(m.saldoPrejuizo), "text-gray-500 italic"],
+                                  
+                                  ["IR Swing Trade (Ações/ETF)", fmt(m.irAcoesST + m.irEtfST), ""],
+                                  ["IR Day Trade (20%)", fmt(m.irDT), ""],
+                                  ["IR FII (20%)", fmt(m.irFII), ""],
+                                  
+                                  m.isentoST
+                                    ? ["Isenção Ações ST", "Sim (Vendas ≤ 20k)", "text-emerald-400"]
+                                    : ["Isenção Ações ST", "Não", "text-red-400"],
+                                ].map(([label, value, cls], i, arr) => (
+                                  <div key={label} className={`flex justify-between text-sm
+                                    ${i === arr.length - 1 ? "pt-2 border-t border-gray-800 font-medium text-white" : "text-white"}`}>
+                                    <span className="text-gray-400">{label}</span>
+                                    <span className={cls || ""}>{value}</span>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {/* Seção Guia do DARF */}
+                              {m.irTotal > 0 && (
+                                <div className="mt-4 p-4 rounded-lg bg-gray-950 border border-gray-800 space-y-4">
+                                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-900 pb-3">
+                                    <div>
+                                      <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                                        <span className={`w-2 h-2 rounded-full ${isPaid ? "bg-emerald-500" : "bg-red-500 animate-pulse"}`}></span>
+                                        Documentação para Emissão de DARF · Código 6015
+                                      </h4>
+                                      <p className="text-xs text-gray-500 mt-0.5">
+                                        Imposto devido sobre ganho líquido de renda variável ({m.label})
+                                      </p>
+                                    </div>
+                                    <div>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          togglePago(m.mesKey, m.irTotal);
+                                        }}
+                                        className={`w-full sm:w-auto text-xs font-medium px-3 py-1.5 rounded-lg flex items-center justify-center gap-1.5 border transition-all cursor-pointer
+                                          ${isPaid
+                                            ? "bg-emerald-950/20 text-emerald-400 border-emerald-500/30 hover:bg-emerald-950/40"
+                                            : "bg-blue-600 hover:bg-blue-500 text-white border-blue-500"}`}
+                                      >
+                                        {isPaid ? (
+                                          <>
+                                            <Check size={12} strokeWidth={3} /> Pago: {pg.dataPagamento ? parseDateText(pg.dataPagamento).toLocaleDateString('pt-BR') : "Confirmado"}
+                                          </>
+                                        ) : (
+                                          "Marcar como Pago"
+                                        )}
+                                      </button>
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                                    <div>
+                                      <span className="text-gray-500 block">Código da Receita</span>
+                                      <span className="font-mono font-bold text-white text-sm">6015</span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-500 block">Período de Apuração (PA)</span>
+                                      <span className="font-mono text-white text-sm">
+                                        {(() => {
+                                          const [y, mm] = m.mesKey.split("-");
+                                          const lastDay = new Date(Number(y), Number(mm), 0).getDate();
+                                          return `${String(lastDay).padStart(2,'0')}/${mm}/${y}`;
+                                        })()}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-500 block">Data de Vencimento</span>
+                                      <span className="font-mono text-white text-sm text-amber-400 font-semibold">
+                                        {(() => {
+                                          const [y, mm] = m.mesKey.split("-");
+                                          const nextM = Number(mm) + 1;
+                                          const targetY = nextM > 12 ? Number(y) + 1 : Number(y);
+                                          const targetM = nextM > 12 ? 1 : nextM;
+                                          const d = new Date(targetY, targetM, 0);
+                                          let day = d.getDate();
+                                          let wIdx = d.getDay();
+                                          if (wIdx === 0) day -= 2;
+                                          else if (wIdx === 6) day -= 1;
+                                          return `${String(day).padStart(2,'0')}/${String(targetM).padStart(2,'0')}/${targetY}`;
+                                        })()}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="text-gray-500 block">Valor do Imposto</span>
+                                      <span className="font-mono font-bold text-white text-sm">{fmt(m.irTotal)}</span>
+                                    </div>
+                                  </div>
+
+                                  {m.irTotal < 10 && (
+                                    <div className="p-3 bg-amber-950/20 rounded border border-amber-500/20 text-[11px] text-amber-300 flex gap-2">
+                                      <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                                      <div>
+                                        <span className="font-semibold block">Imposto inferior a R$ 10,00</span>
+                                        DARFs com valor total inferior a R$ 10,00 não podem ser emitidos ou pagos isoladamente no banco. O ideal é que você adicione esse valor ao total do próximo DARF no Sicalc até que a soma atinja o mínimo de R$ 10,00.
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  <div className="flex border-t border-gray-900 pt-3 flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px]">
+                                    <span className="text-gray-500">
+                                      * Utilize as informações acima ao gerar o DARF no Sicalc Web da Receita Federal.
+                                    </span>
+                                    <a
+                                      href="https://sicalc.receita.fazenda.gov.br/sicalc/rapido/contribuinte"
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="font-medium text-blue-400 hover:text-blue-300 flex items-center gap-1 transition-colors self-start sm:self-auto uppercase tracking-wide"
+                                    >
+                                      <span>Acessar Sicalc Web</span>
+                                      <span className="inline-block text-[10px]">↗</span>
+                                    </a>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  );
+                })}
               </div>
             )}
 

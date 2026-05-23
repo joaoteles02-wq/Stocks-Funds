@@ -218,6 +218,7 @@ export default function App() {
   const [filterTipoAtividade, setFilterTipoAtividade] = useState<string>("All");
   const [pieViewMode, setPieViewMode] = useState<'Ticker' | 'Tipo/Atividade' | 'Banco/Corretora'>('Ticker');
   const [selectedYieldYear, setSelectedYieldYear] = useState<string>(currentYear);
+  const [desempenhoMode, setDesempenhoMode] = useState<'saldo' | 'ytd'>('saldo');
 
   const [dashboardSparkline, setDashboardSparkline] = useState<{ ticker: string, history: { index: number, price: number, dateStr?: string }[] }>({ ticker: 'All', history: [] });
 
@@ -1792,42 +1793,16 @@ export default function App() {
     return sum;
   };
 
-  const computedPatrimonioVarMes = useMemo(() => {
-    if (filterYear === "All" || filterMonth === "All") return null;
-    
-    const mNum = parseInt(filterMonth, 10);
-    const yNum = parseInt(filterYear, 10);
-    
-    let prevM = mNum === 1 ? "12" : String(mNum - 1).padStart(2, '0');
-    let prevY = mNum === 1 ? String(yNum - 1) : String(yNum);
-    
-    const curVal = getPatrimonioFor(filterTicker, filterYear, filterMonth);
-    const prevVal = getPatrimonioFor(filterTicker, prevY, prevM);
-    
-    if (prevVal === 0) return 0;
-    return ((curVal / prevVal) - 1) * 100;
-  }, [allData, filterTicker, filterYear, filterMonth]);
 
-  const computedPatrimonioVarYtd = useMemo(() => {
-    if (filterYear === "All" || filterMonth === "All") return null;
-    
-    const curVal = getPatrimonioFor(filterTicker, filterYear, filterMonth);
-    const janVal = getPatrimonioFor(filterTicker, filterYear, "01");
-    
-    if (janVal === 0) return 0;
-    return ((curVal / janVal) - 1) * 100;
-  }, [allData, filterTicker, filterYear, filterMonth]);
 
-  const computedPatrimonioNum = useMemo(() => {
-    if (!allData || allData.length === 0) return 0;
+  const portfolioAllocationMap = useMemo(() => {
     const tickerMap = new Map<string, number>();
+    if (!allData || allData.length === 0) return { tickerMap, total: 0 };
     
     allData.forEach(row => {
       const ticker = String(row["Ticker"] || "").trim().toUpperCase();
       if (!ticker || ticker === "MONTH CLOSING" || ticker === "TOTAL") return;
       
-      if (filterTicker !== "All" && ticker !== filterTicker.toUpperCase()) return;
-
       const info = swingTradeData[ticker];
       
       if (info && info.currentPrice > 0) {
@@ -1875,8 +1850,246 @@ export default function App() {
 
     let total = 0;
     tickerMap.forEach(v => total += v);
-    return total;
-  }, [allData, filterTicker, swingTradeData]);
+    return { tickerMap, total };
+  }, [allData, swingTradeData]);
+
+  const computedPatrimonioNum = useMemo(() => {
+    const { tickerMap, total } = portfolioAllocationMap;
+    if (filterTicker === "All") return total;
+    return tickerMap.get(filterTicker.toUpperCase()) || 0;
+  }, [portfolioAllocationMap, filterTicker]);
+
+  const computedIntegratedYtdHistory = useMemo(() => {
+    const { tickerMap } = portfolioAllocationMap;
+    // Pega os tickers ativos com saldo positivo
+    const activeTickers = Array.from(tickerMap.entries())
+      .filter(([_, allocation]) => allocation > 0)
+      .map(([ticker]) => ticker);
+
+    if (activeTickers.length === 0) return [];
+
+    const allDates = new Set<number>();
+    activeTickers.forEach(ticker => {
+      const history = swingTradeData[ticker]?.ytdHistory;
+      if (Array.isArray(history)) {
+        history.forEach(h => {
+          if (h.date) {
+            allDates.add(h.date);
+          }
+        });
+      }
+    });
+
+    const sortedTimestamps = Array.from(allDates).sort((a, b) => a - b);
+    if (sortedTimestamps.length === 0) return [];
+
+    // Preços de base de janeiro (primeiro registro de preço de cada ativo)
+    const tickerBasePrices = new Map<string, number>();
+    activeTickers.forEach(ticker => {
+      const history = swingTradeData[ticker]?.ytdHistory;
+      if (Array.isArray(history) && history.length > 0) {
+        const firstValid = history.find(h => typeof h.price === 'number' && h.price > 0);
+        if (firstValid) {
+          tickerBasePrices.set(ticker, firstValid.price);
+        }
+      }
+    });
+
+    // Pega alocação total destes ativos para calcular pesos proporcionais
+    let totalActiveAllocation = 0;
+    activeTickers.forEach(ticker => {
+      totalActiveAllocation += tickerMap.get(ticker) || 0;
+    });
+
+    const tickerWeights = new Map<string, number>();
+    if (totalActiveAllocation > 0) {
+      activeTickers.forEach(ticker => {
+        const alloc = tickerMap.get(ticker) || 0;
+        tickerWeights.set(ticker, alloc / totalActiveAllocation);
+      });
+    }
+
+    const tickerPointers = new Map<string, number>();
+    activeTickers.forEach(ticker => tickerPointers.set(ticker, 0));
+
+    const tickerLastPrices = new Map<string, number>();
+    activeTickers.forEach(ticker => {
+      const history = swingTradeData[ticker]?.ytdHistory;
+      if (Array.isArray(history) && history.length > 0) {
+        const firstValid = history.find(h => typeof h.price === 'number' && h.price > 0);
+        if (firstValid) {
+          tickerLastPrices.set(ticker, firstValid.price);
+        }
+      }
+    });
+
+    return sortedTimestamps.map(t => {
+      activeTickers.forEach(ticker => {
+        const history = swingTradeData[ticker]?.ytdHistory;
+        if (Array.isArray(history)) {
+          let ptr = tickerPointers.get(ticker) || 0;
+          while (ptr < history.length && history[ptr].date <= t) {
+            if (typeof history[ptr].price === 'number' && history[ptr].price > 0) {
+              tickerLastPrices.set(ticker, history[ptr].price);
+            }
+            ptr++;
+          }
+          tickerPointers.set(ticker, ptr);
+        }
+      });
+
+      let weightedYtdSum = 0;
+      activeTickers.forEach(ticker => {
+        const weight = tickerWeights.get(ticker) || 0;
+        const basePrice = tickerBasePrices.get(ticker) || 0;
+        const currentPriceOnDate = tickerLastPrices.get(ticker) || 0;
+
+        let assetYtd = 0;
+        if (basePrice > 0) {
+          assetYtd = ((currentPriceOnDate / basePrice) - 1) * 100;
+        }
+        weightedYtdSum += weight * assetYtd;
+      });
+
+      const dateObj = new Date(t);
+      const dateStr = `${String(dateObj.getDate()).padStart(2, '0')}/${String(dateObj.getMonth() + 1).padStart(2, '0')}/${dateObj.getFullYear()}`;
+
+      return {
+        Data: dateStr,
+        timestamp: t,
+        "Variação YTD (%)": parseFloat(weightedYtdSum.toFixed(2))
+      };
+    });
+  }, [portfolioAllocationMap, swingTradeData]);
+
+  const computedPatrimonioVarMes = useMemo(() => {
+    if (filterTicker !== "All") {
+      const info = swingTradeData[filterTicker.toUpperCase()];
+      if (!info || info.perfMonth === "NOT FOUND" || info.perfMonth === "-") return null;
+      const parsed = parseFloat(String(info.perfMonth).replace('%', ''));
+      return isNaN(parsed) ? null : parsed;
+    }
+
+    const { tickerMap } = portfolioAllocationMap;
+    // Pega os tickers ativos com saldo positivo
+    const activeTickers = Array.from(tickerMap.entries())
+      .filter(([_, allocation]) => allocation > 0)
+      .map(([ticker]) => ticker);
+
+    if (activeTickers.length === 0) {
+      if (filterYear === "All" || filterMonth === "All") return null;
+      const mNum = parseInt(filterMonth, 10);
+      const yNum = parseInt(filterYear, 10);
+      let prevM = mNum === 1 ? "12" : String(mNum - 1).padStart(2, '0');
+      let prevY = mNum === 1 ? String(yNum - 1) : String(yNum);
+      const curVal = getPatrimonioFor(filterTicker, filterYear, filterMonth);
+      const prevVal = getPatrimonioFor(filterTicker, prevY, prevM);
+      if (prevVal === 0) return 0;
+      return ((curVal / prevVal) - 1) * 100;
+    }
+
+    // Alocação total
+    let totalActiveAllocation = 0;
+    activeTickers.forEach(ticker => {
+      totalActiveAllocation += tickerMap.get(ticker) || 0;
+    });
+
+    if (totalActiveAllocation === 0) return 0;
+
+    let weightedSum = 0;
+    let validCount = 0;
+
+    activeTickers.forEach(ticker => {
+      const alloc = tickerMap.get(ticker) || 0;
+      const info = swingTradeData[ticker];
+      if (info && info.perfMonth !== "NOT FOUND" && info.perfMonth !== "-") {
+        const perfVal = parseFloat(String(info.perfMonth).replace('%', ''));
+        if (!isNaN(perfVal)) {
+          weightedSum += (alloc / totalActiveAllocation) * perfVal;
+          validCount++;
+        }
+      }
+    });
+
+    if (validCount === 0) return null;
+    return parseFloat(weightedSum.toFixed(2));
+  }, [portfolioAllocationMap, swingTradeData, filterTicker, allData, filterYear, filterMonth]);
+
+  const computedPatrimonioVarYtd = useMemo(() => {
+    if (filterTicker !== "All") {
+      const info = swingTradeData[filterTicker.toUpperCase()];
+      if (!info || info.perfYTD === "NOT FOUND" || info.perfYTD === "-") return null;
+      const parsed = parseFloat(String(info.perfYTD).replace('%', ''));
+      return isNaN(parsed) ? null : parsed;
+    }
+
+    if (computedIntegratedYtdHistory.length > 0) {
+      return computedIntegratedYtdHistory[computedIntegratedYtdHistory.length - 1]["Variação YTD (%)"];
+    }
+
+    // Fallback para a planilha/histórico antigo se não houver cotações ou histórico integrado YTD
+    if (filterYear === "All" || filterMonth === "All") return null;
+    const curVal = getPatrimonioFor(filterTicker, filterYear, filterMonth);
+    const janVal = getPatrimonioFor(filterTicker, filterYear, "01");
+    if (janVal === 0) return 0;
+    return ((curVal / janVal) - 1) * 100;
+  }, [computedIntegratedYtdHistory, filterTicker, swingTradeData, allData, filterYear, filterMonth]);
+
+  const computedPatrimonioVarMesAll = useMemo(() => {
+    const { tickerMap } = portfolioAllocationMap;
+    const activeTickers = Array.from(tickerMap.entries())
+      .filter(([_, allocation]) => allocation > 0)
+      .map(([ticker]) => ticker);
+
+    if (activeTickers.length === 0) {
+      if (filterYear === "All" || filterMonth === "All") return null;
+      const mNum = parseInt(filterMonth, 10);
+      const yNum = parseInt(filterYear, 10);
+      let prevM = mNum === 1 ? "12" : String(mNum - 1).padStart(2, '0');
+      let prevY = mNum === 1 ? String(yNum - 1) : String(yNum);
+      const curVal = getPatrimonioFor("All", filterYear, filterMonth);
+      const prevVal = getPatrimonioFor("All", prevY, prevM);
+      if (prevVal === 0) return 0;
+      return ((curVal / prevVal) - 1) * 100;
+    }
+
+    let totalActiveAllocation = 0;
+    activeTickers.forEach(ticker => {
+      totalActiveAllocation += tickerMap.get(ticker) || 0;
+    });
+
+    if (totalActiveAllocation === 0) return 0;
+
+    let weightedSum = 0;
+    let validCount = 0;
+
+    activeTickers.forEach(ticker => {
+      const alloc = tickerMap.get(ticker) || 0;
+      const info = swingTradeData[ticker];
+      if (info && info.perfMonth !== "NOT FOUND" && info.perfMonth !== "-") {
+        const perfVal = parseFloat(String(info.perfMonth).replace('%', ''));
+        if (!isNaN(perfVal)) {
+          weightedSum += (alloc / totalActiveAllocation) * perfVal;
+          validCount++;
+        }
+      }
+    });
+
+    if (validCount === 0) return null;
+    return parseFloat(weightedSum.toFixed(2));
+  }, [portfolioAllocationMap, swingTradeData, allData, filterYear, filterMonth]);
+
+  const computedPatrimonioVarYtdAll = useMemo(() => {
+    if (computedIntegratedYtdHistory.length > 0) {
+      return computedIntegratedYtdHistory[computedIntegratedYtdHistory.length - 1]["Variação YTD (%)"];
+    }
+
+    if (filterYear === "All" || filterMonth === "All") return null;
+    const curVal = getPatrimonioFor("All", filterYear, filterMonth);
+    const janVal = getPatrimonioFor("All", filterYear, "01");
+    if (janVal === 0) return 0;
+    return ((curVal / janVal) - 1) * 100;
+  }, [computedIntegratedYtdHistory, allData, filterYear, filterMonth]);
 
   const computedPatrimonio = useMemo(() => {
     return `R$ ${computedPatrimonioNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -2691,11 +2904,49 @@ export default function App() {
                   >
 
               {/* Sparkline YTD Dashboard (Moved above summary cards) */}
-              <div className="glass-panel p-5 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-3 w-full border border-[var(--color-accent-teal)]/20 bg-[var(--color-accent-teal)]/5">
-                <h3 className="font-bold text-[var(--color-accent-teal)] flex items-center gap-2">
-                  <Activity className="w-5 h-5" />
-                  Sparkline YTD ({dashboardSparkline.ticker === 'All' ? 'Selecione um Ticker no filtro' : dashboardSparkline.ticker})
-                </h3>
+              <div className="glass-panel p-5 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-3 w-full border border-[var(--color-accent-teal)]/20 bg-[var(--color-accent-teal)]/5 relative">
+                
+                {/* Portfólio copy in top-left (with 40% font size reduction) */}
+                <div className="absolute top-4 left-5 flex flex-col items-start select-none z-10">
+                  <span className="text-[8px] sm:text-[10px] tracking-wide uppercase font-semibold text-slate-400">Portfólio</span>
+                  <span className="text-sm sm:text-lg lg:text-2xl font-extrabold text-slate-100 flex items-center gap-1.5 mt-0.5">
+                    {isFetchingSwing ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--color-accent-teal)]" />
+                    ) : (
+                      computedPatrimonio
+                    )}
+                  </span>
+                </div>
+
+                {/* Yields copy in top-right (with 40% font size reduction) */}
+                <div className="absolute top-4 right-5 flex flex-col items-end select-none z-10">
+                  <span className="text-[8px] sm:text-[10px] tracking-wide uppercase font-semibold text-slate-400">Yields</span>
+                  <span className="text-sm sm:text-lg lg:text-2xl font-extrabold text-[var(--color-accent-teal)] flex items-center gap-1.5 mt-0.5">
+                    {isFetchingSwing ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--color-accent-teal)]" />
+                    ) : (
+                      computedYields
+                    )}
+                  </span>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-2 w-full min-h-[40px] pt-1 sm:pt-2">
+                  <h3 className="font-bold text-[var(--color-accent-teal)] flex items-center gap-2 select-none justify-center">
+                    <Activity className="w-5 h-5 flex-shrink-0" />
+                    <span className="truncate max-w-[130px] sm:max-w-none">
+                      Sparkline YTD ({dashboardSparkline.ticker === 'All' ? 'Selecione um Ticker no filtro' : dashboardSparkline.ticker})
+                    </span>
+                  </h3>
+                  <button
+                    onClick={() => fetchSwingTradeBatch(tickers)}
+                    disabled={isFetchingSwing || tickers.length === 0}
+                    className="px-2.5 py-1 bg-[var(--color-accent-teal)]/10 hover:bg-[var(--color-accent-teal)]/20 border border-[var(--color-accent-teal)]/30 text-[var(--color-accent-teal)] rounded-lg font-bold transition-all flex items-center gap-1.5 disabled:opacity-50 text-[9px] uppercase tracking-widest sm:ml-2"
+                    title="Atualizar Valores Exatos na B3 Média"
+                  >
+                    {isFetchingSwing ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <RefreshCw className="w-2.5 h-2.5" />}
+                    Atualizar
+                  </button>
+                </div>
 
                 <div className="bg-black/40 p-3 w-full min-w-0 rounded-xl border border-white/5 relative h-[150px] mt-2">
                   {dashboardSparkline.ticker !== 'All' && dashboardSparkline.history.length > 0 ? (
@@ -2742,146 +2993,118 @@ export default function App() {
                       {dashboardSparkline.ticker === 'All' ? '' : 'Sem dados para o período'}
                     </div>
                   )}
+
+                  {/* Copies of Var Mês and Var YTD in the bottom right corner with 50% font size copy style */}
+                  <div className="absolute bottom-3 right-4 flex items-center gap-2 z-20 text-[10px] sm:text-xs pointer-events-none select-none bg-slate-950/70 backdrop-blur-md px-2 py-0.5 rounded-lg border border-white/5 shadow-md">
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-400 font-medium">Mês:</span>
+                      <span className={`font-semibold ${computedPatrimonioVarMes === null ? 'text-slate-500' : computedPatrimonioVarMes >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {computedPatrimonioVarMes === null ? '---' : `${computedPatrimonioVarMes >= 0 ? '+' : ''}${computedPatrimonioVarMes.toFixed(2)}%`}
+                      </span>
+                    </div>
+                    <div className="w-[1px] h-2.5 bg-white/15" />
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-400 font-medium">YTD:</span>
+                      <span className={`font-semibold ${computedPatrimonioVarYtd === null ? 'text-slate-500' : computedPatrimonioVarYtd >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {computedPatrimonioVarYtd === null ? '---' : `${computedPatrimonioVarYtd >= 0 ? '+' : ''}${computedPatrimonioVarYtd.toFixed(2)}%`}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              {/* Dashboard Panels Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
-                
-                {/* Total Balance Card */}
-                <div className="glass-panel p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] flex flex-col gap-4 sm:gap-6 relative overflow-hidden h-full lg:col-span-2 z-20">
-                  <div className="absolute -top-12 -right-12 w-32 h-32 bg-[var(--color-accent-violet)] rounded-full blur-[60px] opacity-30 pointer-events-none"></div>
-                  
-                  <div className="flex items-center justify-between w-full relative z-10">
-                    <span className="text-xs tracking-wide uppercase sm:text-sm font-medium text-slate-300">Portfólio</span>
-                    <button
-                      onClick={() => fetchSwingTradeBatch(tickers)}
-                      disabled={isFetchingSwing || tickers.length === 0}
-                      className="px-3 py-1.5 bg-[var(--color-accent-teal)]/10 hover:bg-[var(--color-accent-teal)]/20 border border-[var(--color-accent-teal)]/30 text-[var(--color-accent-teal)] rounded-xl font-bold transition-all flex items-center gap-2 disabled:opacity-50 text-[10px] uppercase tracking-widest"
-                      title="Atualizar Valores Exatos na B3 Média"
-                    >
-                      {isFetchingSwing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                      Atualizar
-                    </button>
-                  </div>
-                  
-                  <div className="z-10">
-                    <h2 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight mb-2 truncate flex items-center gap-3">
-                      {isFetchingSwing ? (
-                        <>
-                          <Loader2 className="w-8 h-8 sm:w-10 sm:h-10 animate-spin text-[var(--color-accent-teal)]" />
-                          <span className="text-2xl sm:text-3xl text-slate-400">Calculando...</span>
-                        </>
-                      ) : (
-                        computedPatrimonio
-                      )}
-                    </h2>
-                  </div>
-                </div>
-
-                {/* Yields Card */}
-                <div className="glass-panel p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] flex flex-col justify-between relative overflow-hidden h-full lg:col-span-2 border-t-2 border-t-[var(--color-accent-teal)]/20">
-                  <div className="absolute -bottom-10 -right-10 w-24 h-24 bg-[var(--color-accent-teal)]/50 rounded-full blur-[50px] opacity-20 pointer-events-none"></div>
-                  
-                  <div className="flex items-center gap-3 w-full relative z-10 mb-2">
-                    <span className="text-xs tracking-wide uppercase sm:text-sm font-medium text-slate-300">Yields</span>
-                  </div>
-                  
-                  <div className="z-10 min-h-[40px] flex items-end mt-2">
-                    <h2 className="text-2xl sm:text-4xl font-bold tracking-tight truncate text-[var(--color-accent-teal)] flex items-center gap-3">
-                      {isFetchingSwing ? (
-                        <>
-                          <Loader2 className="w-6 h-6 sm:w-8 sm:h-8 animate-spin text-[var(--color-accent-teal)]" />
-                          <span className="text-xl sm:text-2xl text-slate-400">...</span>
-                        </>
-                      ) : (
-                        computedYields
-                      )}
-                    </h2>
-                  </div>
-                </div>
-
-                {/* Var Mês Card */}
-                <div className="glass-panel p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] flex flex-col justify-between relative overflow-hidden h-full lg:col-span-2 border-t-2 border-t-emerald-500/20">
-                  <div className="absolute -bottom-10 -right-10 w-24 h-24 bg-emerald-500/50 rounded-full blur-[50px] opacity-20 pointer-events-none"></div>
-                  <div className="flex items-center gap-3 mb-2 z-10">
-                    <span className="text-xs tracking-wide uppercase sm:text-sm font-medium text-slate-300">% Var Mês</span>
-                  </div>
-                  <div className="z-10 min-h-[40px] flex items-end mt-2">
-                    <h2 className={`text-2xl sm:text-4xl font-bold tracking-tight flex items-center gap-3 ${computedPatrimonioVarMes === null && !isFetchingSwing ? 'text-slate-500' : (computedPatrimonioVarMes ?? 0) >= 0 && !isFetchingSwing ? 'text-emerald-400' : isFetchingSwing ? 'text-slate-400' : 'text-rose-400'}`}>
-                      {isFetchingSwing ? (
-                        <>
-                          <Loader2 className="w-6 h-6 sm:w-8 sm:h-8 animate-spin text-slate-400" />
-                          <span className="text-xl sm:text-2xl">...</span>
-                        </>
-                      ) : computedPatrimonioVarMes === null ? "---" : `${computedPatrimonioVarMes >= 0 ? "+" : ""}${computedPatrimonioVarMes.toFixed(2)}%`}
-                    </h2>
-                  </div>
-                </div>
-
-                {/* Var YTD Card */}
-                <div className="glass-panel p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] flex flex-col justify-between relative overflow-hidden h-full lg:col-span-2 border-t-2 border-t-blue-500/20">
-                  <div className="absolute -bottom-10 -right-10 w-24 h-24 bg-blue-500/50 rounded-full blur-[50px] opacity-20 pointer-events-none"></div>
-                  <div className="flex items-center gap-3 mb-2 z-10">
-                    <span className="text-xs tracking-wide uppercase sm:text-sm font-medium text-slate-300">% Var YTD</span>
-                  </div>
-                  <div className="z-10 min-h-[40px] flex items-end mt-2">
-                    <h2 className={`text-2xl sm:text-4xl font-bold tracking-tight flex items-center gap-3 ${computedPatrimonioVarYtd === null && !isFetchingSwing ? 'text-slate-500' : (computedPatrimonioVarYtd ?? 0) >= 0 && !isFetchingSwing ? 'text-emerald-400' : isFetchingSwing ? 'text-slate-400' : 'text-rose-400'}`}>
-                      {isFetchingSwing ? (
-                        <>
-                          <Loader2 className="w-6 h-6 sm:w-8 sm:h-8 animate-spin text-slate-400" />
-                          <span className="text-xl sm:text-2xl">...</span>
-                        </>
-                      ) : computedPatrimonioVarYtd === null ? "---" : `${computedPatrimonioVarYtd >= 0 ? "+" : ""}${computedPatrimonioVarYtd.toFixed(2)}%`}
-                    </h2>
-                  </div>
-                </div>
-              </div>
+              {/* Dashboard Panels Grid removed since metrics are integrated inside Sparkline card */}
 
               {/* Charts Section on Dashboard */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
                 {/* Evolution Line Chart */}
-                <div className="glass-panel p-4 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-4 h-[350px] lg:col-span-1">
-                  <div className="flex justify-between items-center mb-2">
+                <div className="glass-panel p-4 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-4 h-[350px] lg:col-span-1 relative">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
                     <h3 className="font-semibold text-lg flex items-center gap-2">
                       <Activity className="w-5 h-5 text-[var(--color-accent-cyan)]" />
                       Desempenho Geral
                     </h3>
+                    
+                    {/* Botões seletores para alternar entre Saldo e Retorno YTD */}
+                    <div className="flex bg-slate-950/60 p-1 rounded-xl border border-white/5 text-xs self-start sm:self-auto">
+                      <button
+                        onClick={() => setDesempenhoMode('saldo')}
+                        className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+                          desempenhoMode === 'saldo'
+                            ? 'bg-[var(--color-accent-cyan)]/25 text-[var(--color-accent-teal)] shadow-[0_0_12px_rgba(45,212,191,0.2)] border border-[var(--color-accent-cyan)]/30'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Saldo (R$)
+                      </button>
+                      <button
+                        onClick={() => setDesempenhoMode('ytd')}
+                        className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
+                          desempenhoMode === 'ytd'
+                            ? 'bg-[var(--color-accent-violet)]/25 text-[var(--color-accent-violet)] shadow-[0_0_12px_rgba(167,139,250,0.2)] border border-[var(--color-accent-violet)]/30'
+                            : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        YTD Ponderado (%)
+                      </button>
+                    </div>
                   </div>
                   
                   <div className="flex-1 w-full min-h-[120px]">
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={computedChartData}>
+                      <AreaChart data={desempenhoMode === 'ytd' ? computedIntegratedYtdHistory : computedChartData}>
                         <defs>
                           <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="var(--color-accent-cyan)" stopOpacity={0.4}/>
-                            <stop offset="95%" stopColor="var(--color-accent-cyan)" stopOpacity={0}/>
+                            <stop offset="5%" stopColor={desempenhoMode === 'ytd' ? "var(--color-accent-violet)" : "var(--color-accent-cyan)"} stopOpacity={0.4}/>
+                            <stop offset="95%" stopColor={desempenhoMode === 'ytd' ? "var(--color-accent-violet)" : "var(--color-accent-cyan)"} stopOpacity={0}/>
                           </linearGradient>
                         </defs>
                         <XAxis dataKey="Data" hide={true} />
                         <Tooltip 
-                          contentStyle={{ 
-                            backgroundColor: 'rgba(13, 27, 42, 0.8)', 
-                            border: '1px solid rgba(255,255,255,0.1)',
-                            borderRadius: '12px',
-                            backdropFilter: 'blur(8px)',
-                            color: '#fff'
-                          }} 
-                          itemStyle={{ color: '#fff' }}
-                          labelStyle={{ color: '#aaa', marginBottom: '4px' }}
-                          formatter={(value: number) => [`R$ ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}`, 'Total']}
+                           contentStyle={{ 
+                             backgroundColor: 'rgba(13, 27, 42, 0.8)', 
+                             border: '1px solid rgba(255,255,255,0.1)',
+                             borderRadius: '12px',
+                             backdropFilter: 'blur(8px)',
+                             color: '#fff'
+                           }} 
+                           itemStyle={{ color: '#fff' }}
+                           labelStyle={{ color: '#aaa', marginBottom: '4px' }}
+                           formatter={(value: number) => {
+                             if (desempenhoMode === 'ytd') {
+                               return [`${value >= 0 ? '+' : ''}${value.toFixed(2)}%`, 'YTD Integrado da Carteira'];
+                             }
+                             return [`R$ ${value.toLocaleString('pt-BR', {minimumFractionDigits:2})}`, 'Total em Carteira'];
+                           }}
                         />
                         <Area 
                           type="natural" 
-                          dataKey="B3 Preço Total" 
-                          stroke="var(--color-accent-cyan)" 
+                          dataKey={desempenhoMode === 'ytd' ? "Variação YTD (%)" : "B3 Preço Total"} 
+                          stroke={desempenhoMode === 'ytd' ? "var(--color-accent-violet)" : "var(--color-accent-cyan)"} 
                           strokeWidth={3}
                           fillOpacity={1} 
                           fill="url(#colorValue)" 
                         />
                       </AreaChart>
                     </ResponsiveContainer>
+                  </div>
+
+                  {/* Copies of Var Mês and Var YTD in the bottom right corner with 50% font size copy style */}
+                  <div className="absolute bottom-3 right-4 flex items-center gap-2 z-20 text-[10px] sm:text-xs pointer-events-none select-none bg-slate-950/70 backdrop-blur-md px-2 py-0.5 rounded-lg border border-white/5 shadow-md">
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-400 font-medium">Mês:</span>
+                      <span className={`font-semibold ${computedPatrimonioVarMesAll === null ? 'text-slate-500' : computedPatrimonioVarMesAll >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {computedPatrimonioVarMesAll === null ? '---' : `${computedPatrimonioVarMesAll >= 0 ? '+' : ''}${computedPatrimonioVarMesAll.toFixed(2)}%`}
+                      </span>
+                    </div>
+                    <div className="w-[1px] h-2.5 bg-white/15" />
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-400 font-medium">YTD:</span>
+                      <span className={`font-semibold ${computedPatrimonioVarYtdAll === null ? 'text-slate-500' : computedPatrimonioVarYtdAll >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {computedPatrimonioVarYtdAll === null ? '---' : `${computedPatrimonioVarYtdAll >= 0 ? '+' : ''}${computedPatrimonioVarYtdAll.toFixed(2)}%`}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
