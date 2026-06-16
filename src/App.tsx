@@ -572,32 +572,20 @@ export default function App() {
          }
       }
 
-      let absUn = isTrade ? Math.abs(unNum) : 0;
+      let currentUn = isTrade ? unNum : 0;
       const isVenda = formTransacao.toUpperCase().includes("VENDA") || formTransacao.toUpperCase().includes("SELL");
-
-      const previousPrecoMedio = previousSaldoUn > 0 ? (previousSaldoCusto / previousSaldoUn) : 0;
-
-      let transTotalBRL = absUn * precoUnNum;
-      if (isUS) {
-         transTotalBRL = transTotalBRL * dollar;
-      }
-
-      let newSaldoUn = 0;
-      let newSaldoCusto = 0;
-      let newPrecoMedio = 0;
-      let totalCustoBRL = 0;
-
       if (isVenda) {
-         newSaldoUn = Math.max(0, previousSaldoUn - absUn);
-         newPrecoMedio = previousPrecoMedio;
-         newSaldoCusto = newSaldoUn * newPrecoMedio;
-         totalCustoBRL = -transTotalBRL;
-      } else {
-         newSaldoUn = previousSaldoUn + absUn;
-         newSaldoCusto = previousSaldoCusto + transTotalBRL;
-         newPrecoMedio = newSaldoUn > 0 ? (newSaldoCusto / newSaldoUn) : 0;
-         totalCustoBRL = transTotalBRL;
+         currentUn = -Math.abs(currentUn);
       }
+
+      let totalCustoBRL = currentUn * (isTrade ? precoUnNum : 0);
+      if (isUS) {
+         totalCustoBRL = totalCustoBRL * dollar;
+      }
+
+      const newSaldoUn = previousSaldoUn + currentUn;
+      const newSaldoCusto = previousSaldoCusto + totalCustoBRL; 
+      const newPrecoMedio = newSaldoUn > 0 ? (newSaldoCusto / newSaldoUn) : 0;
       
       // B3 Preço total calculado sobre Saldo de Un
       let b3PrecoTotal = 0;
@@ -1597,48 +1585,36 @@ export default function App() {
 
       let currentUn = parseNum(row["UN"]);
       const isVenda = row["Transação"].includes("VENDA") || row["Transação"].includes("SELL");
-      let absUn = Math.abs(currentUn);
+      if (isVenda) {
+        currentUn = -Math.abs(currentUn);
+      }
 
       const precoUn = parseNum(row["Preço Un de Custo"]);
       let totalCustoBRL = parseNum(row["Total do Custo"]);
-      let transTotalBRL = Math.abs(totalCustoBRL);
 
       const isUS = String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "").trim().toUpperCase() === "US STOCKS";
 
-      // Se não houver Total do Custo no CSV, calcula o custo absoluto do trade
-      if (transTotalBRL === 0 && precoUn !== 0) {
-        let tc = absUn * precoUn;
+      // Se não houver Total do Custo no CSV, calcula o custo do trade
+      if (totalCustoBRL === 0 && precoUn !== 0) {
+        let tc = Math.abs(currentUn) * precoUn;
         if (isUS) {
            let dVal = parseNum(row["Dollar"]);
            if (dVal <= 0) dVal = 1;
-           transTotalBRL = tc * dVal;
+           totalCustoBRL = tc * dVal;
         } else {
-           transTotalBRL = tc;
+           totalCustoBRL = tc;
         }
       }
 
-      let precoMedio = 0;
       if (isVenda) {
-        // Para Venda (Sell):
-        // 1. Saldo de UN diminui
-        state.saldoUn = Math.max(0, previousSaldoUn - absUn);
-        // 2. Preço Médio continua o mesmo
-        precoMedio = previousPrecoMedio;
-        // 3. Saldo de Custo diminui proporcionalmente ao preço médio anterior
-        state.saldoCusto = state.saldoUn * precoMedio;
-        
-        totalCustoBRL = -transTotalBRL;
+        totalCustoBRL = -Math.abs(totalCustoBRL);
       } else {
-        // Para Compra (Buy) ou outras transações:
-        // 1. Saldo de UN aumenta
-        state.saldoUn = previousSaldoUn + absUn;
-        // 2. Saldo de Custo aumenta pelo custo real de aquisição da compra
-        state.saldoCusto = previousSaldoCusto + transTotalBRL;
-        // 3. Preço Médio é recalculado
-        precoMedio = state.saldoUn > 0 ? (state.saldoCusto / state.saldoUn) : 0;
-
-        totalCustoBRL = transTotalBRL;
+        totalCustoBRL = Math.abs(totalCustoBRL);
       }
+
+      state.saldoUn = previousSaldoUn + currentUn;
+      state.saldoCusto = previousSaldoCusto + totalCustoBRL;
+      let precoMedio = state.saldoUn > 0 ? (state.saldoCusto / state.saldoUn) : 0;
 
       // Formatação para Display
       if (isUS) {
