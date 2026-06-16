@@ -572,20 +572,32 @@ export default function App() {
          }
       }
 
-      let currentUn = isTrade ? unNum : 0;
-      if (formTransacao.toUpperCase().includes("VENDA") || formTransacao.toUpperCase().includes("SELL")) {
-         currentUn = -Math.abs(currentUn);
+      let absUn = isTrade ? Math.abs(unNum) : 0;
+      const isVenda = formTransacao.toUpperCase().includes("VENDA") || formTransacao.toUpperCase().includes("SELL");
+
+      const previousPrecoMedio = previousSaldoUn > 0 ? (previousSaldoCusto / previousSaldoUn) : 0;
+
+      let transTotalBRL = absUn * precoUnNum;
+      if (isUS) {
+         transTotalBRL = transTotalBRL * dollar;
       }
 
-      let totalCusto = currentUn * (isTrade ? precoUnNum : 0);
-      let totalCustoBRL = totalCusto;
-      if (isUS) {
-         totalCustoBRL = totalCusto * dollar;
+      let newSaldoUn = 0;
+      let newSaldoCusto = 0;
+      let newPrecoMedio = 0;
+      let totalCustoBRL = 0;
+
+      if (isVenda) {
+         newSaldoUn = Math.max(0, previousSaldoUn - absUn);
+         newPrecoMedio = previousPrecoMedio;
+         newSaldoCusto = newSaldoUn * newPrecoMedio;
+         totalCustoBRL = -transTotalBRL;
+      } else {
+         newSaldoUn = previousSaldoUn + absUn;
+         newSaldoCusto = previousSaldoCusto + transTotalBRL;
+         newPrecoMedio = newSaldoUn > 0 ? (newSaldoCusto / newSaldoUn) : 0;
+         totalCustoBRL = transTotalBRL;
       }
-      const newSaldoUn = previousSaldoUn + currentUn;
-      // Saldo Custo = Total de Custo (BRL) + Saldo Custo (anterior)
-      const newSaldoCusto = previousSaldoCusto + totalCustoBRL; 
-      const newPrecoMedio = newSaldoUn !== 0 ? (Math.abs(newSaldoCusto) / Math.abs(newSaldoUn)) : 0;
       
       // B3 Preço total calculado sobre Saldo de Un
       let b3PrecoTotal = 0;
@@ -1579,32 +1591,54 @@ export default function App() {
       if (!tickerState.has(ticker)) tickerState.set(ticker, { saldoUn: 0, saldoCusto: 0 });
       const state = tickerState.get(ticker)!;
 
+      const previousSaldoUn = state.saldoUn;
+      const previousSaldoCusto = state.saldoCusto;
+      const previousPrecoMedio = previousSaldoUn > 0 ? (previousSaldoCusto / previousSaldoUn) : 0;
+
       let currentUn = parseNum(row["UN"]);
       const isVenda = row["Transação"].includes("VENDA") || row["Transação"].includes("SELL");
-      if (isVenda && currentUn > 0) currentUn = -currentUn;
+      let absUn = Math.abs(currentUn);
 
       const precoUn = parseNum(row["Preço Un de Custo"]);
       let totalCustoBRL = parseNum(row["Total do Custo"]);
-      if (isVenda && totalCustoBRL > 0) totalCustoBRL = -totalCustoBRL;
-      
-      // Se não houver Total do Custo no CSV, calcula
-      if (totalCustoBRL === 0 && precoUn !== 0) {
-        let tc = currentUn * precoUn;
-        const isUS = String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "").trim().toUpperCase() === "US STOCKS";
+      let transTotalBRL = Math.abs(totalCustoBRL);
+
+      const isUS = String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "").trim().toUpperCase() === "US STOCKS";
+
+      // Se não houver Total do Custo no CSV, calcula o custo absoluto do trade
+      if (transTotalBRL === 0 && precoUn !== 0) {
+        let tc = absUn * precoUn;
         if (isUS) {
            let dVal = parseNum(row["Dollar"]);
            if (dVal <= 0) dVal = 1;
-           totalCustoBRL = tc * dVal;
+           transTotalBRL = tc * dVal;
         } else {
-           totalCustoBRL = tc;
+           transTotalBRL = tc;
         }
       }
-      
-      const isUS = String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "").trim().toUpperCase() === "US STOCKS";
-      state.saldoUn += currentUn;
-      state.saldoCusto += totalCustoBRL; // Saldo Custo = Total de Custo + Saldo Custo (anterior)
-      
-      const precoMedio = state.saldoUn !== 0 ? (Math.abs(state.saldoCusto) / Math.abs(state.saldoUn)) : 0;
+
+      let precoMedio = 0;
+      if (isVenda) {
+        // Para Venda (Sell):
+        // 1. Saldo de UN diminui
+        state.saldoUn = Math.max(0, previousSaldoUn - absUn);
+        // 2. Preço Médio continua o mesmo
+        precoMedio = previousPrecoMedio;
+        // 3. Saldo de Custo diminui proporcionalmente ao preço médio anterior
+        state.saldoCusto = state.saldoUn * precoMedio;
+        
+        totalCustoBRL = -transTotalBRL;
+      } else {
+        // Para Compra (Buy) ou outras transações:
+        // 1. Saldo de UN aumenta
+        state.saldoUn = previousSaldoUn + absUn;
+        // 2. Saldo de Custo aumenta pelo custo real de aquisição da compra
+        state.saldoCusto = previousSaldoCusto + transTotalBRL;
+        // 3. Preço Médio é recalculado
+        precoMedio = state.saldoUn > 0 ? (state.saldoCusto / state.saldoUn) : 0;
+
+        totalCustoBRL = transTotalBRL;
+      }
 
       // Formatação para Display
       if (isUS) {
