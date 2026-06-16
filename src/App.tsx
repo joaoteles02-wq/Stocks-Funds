@@ -801,14 +801,42 @@ export default function App() {
   // Load User Config & Data from Firestore
   useEffect(() => {
     if (user) {
+      let initialTokens = null;
+      let initialConnected = false;
+
+      // Check for pending sheets tokens from separate tab/window redirect
+      try {
+        const pendingTokens = localStorage.getItem('google_sheets_auth_tokens');
+        if (pendingTokens) {
+          const tokens = JSON.parse(pendingTokens);
+          localStorage.removeItem('google_sheets_auth_tokens');
+          initialTokens = tokens;
+          initialConnected = true;
+          
+          setSheetsTokens(tokens);
+          setSheetsConnected(true);
+          
+          setDoc(doc(db, 'users', user.uid, 'config', 'sheets'), {
+            sheetsTokens: tokens,
+            sheetsConnected: true,
+          }, { merge: true }).catch(err => {
+            console.error("Failed saving pending tokens:", err);
+          });
+        }
+      } catch (err) {
+        console.error("Checking pending tokens failed", err);
+      }
+
       // Load Config
       const configDoc = doc(db, 'users', user.uid, 'config', 'sheets');
       getDoc(configDoc).then((snap) => {
         if (snap.exists()) {
           const data = snap.data();
           setSpreadsheetId(data.spreadsheetId || '');
-          setSheetsTokens(data.sheetsTokens || null);
-          setSheetsConnected(!!data.sheetsConnected);
+          if (!initialConnected) {
+            setSheetsTokens(data.sheetsTokens || null);
+            setSheetsConnected(!!data.sheetsConnected);
+          }
         }
       });
 
@@ -1039,31 +1067,31 @@ export default function App() {
       ? spreadsheetId.split('/d/')[1].split('/')[0] 
       : spreadsheetId.trim();
 
-    const formatBRL = (val: number) => {
-      return val.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const toNumericValue = (val: any) => {
+      if (val === undefined || val === null) return "";
+      const s = String(val).trim();
+      if (s === "") return "";
+      const num = parseMoney(val);
+      return isNaN(num) ? "" : num;
     };
 
     const rowDataArr = new Array(24).fill("");
     rowDataArr[3] = record["Data"] ?? "";
     rowDataArr[4] = record["Ticker"] ?? "";
     rowDataArr[5] = String(record["Transação"] || "").toUpperCase();
-    rowDataArr[6] = record["Yields"] ?? "";
-    rowDataArr[7] = record["UN"] ?? "";
-    rowDataArr[8] = record["Saldo de Un"] ?? "";
-    rowDataArr[9] = record["Preço Un de Custo"] ?? "";
-    
-    // Total do Custo formatado como R$ 1.234,56
-    const totalCustoVal = parseMoney(record["Total do Custo"]);
-    rowDataArr[10] = formatBRL(totalCustoVal);
-    
-    rowDataArr[11] = record["Saldo do Custo"] ?? record["Saldo Custo"] ?? "";
-    rowDataArr[12] = record["Preço Médio"] ?? "";
-    rowDataArr[13] = record["B3 Preço Un"] ?? "";
-    rowDataArr[14] = record["B3 Preço total"] ?? "";
+    rowDataArr[6] = toNumericValue(record["Yields"]);
+    rowDataArr[7] = toNumericValue(record["UN"]);
+    rowDataArr[8] = toNumericValue(record["Saldo de Un"]);
+    rowDataArr[9] = toNumericValue(record["Preço Un de Custo"]);
+    rowDataArr[10] = toNumericValue(record["Total do Custo"]);
+    rowDataArr[11] = toNumericValue(record["Saldo do Custo"] ?? record["Saldo Custo"]);
+    rowDataArr[12] = toNumericValue(record["Preço Médio"]);
+    rowDataArr[13] = toNumericValue(record["B3 Preço Un"]);
+    rowDataArr[14] = toNumericValue(record["B3 Preço total"]);
     rowDataArr[19] = record["Tipo/Atividade"] ?? record["Tipo Atividade"] ?? "";
     rowDataArr[20] = record["Banco/Corretora"] ?? "";
     rowDataArr[21] = record["CNPJ"] ?? "";
-    rowDataArr[22] = record["IR"] ?? "";
+    rowDataArr[22] = toNumericValue(record["IR"]);
     rowDataArr[23] = '=INDEX(IFERROR(GOOGLEFINANCE("CURRENCY:USDBRL"; "price"; INDIRECT("D"&ROW())); GOOGLEFINANCE("CURRENCY:USDBRL"; "price"; INDIRECT("D"&ROW())-1)); 2; 2)';
 
     try {

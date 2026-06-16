@@ -255,17 +255,28 @@ app.get("/api/auth/google/callback", async (req, res) => {
       <html>
         <body>
           <script>
+            try {
+              localStorage.setItem('google_sheets_auth_tokens', JSON.stringify(${JSON.stringify(tokens)}));
+            } catch (err) {
+              console.error('LocalStorage error:', err);
+            }
+
             if (window.opener) {
-              window.opener.postMessage({ 
-                type: 'GOOGLE_SHEETS_AUTH_SUCCESS',
-                tokens: ${JSON.stringify(tokens)}
-              }, '*');
-              window.close();
+              try {
+                window.opener.postMessage({ 
+                  type: 'GOOGLE_SHEETS_AUTH_SUCCESS',
+                  tokens: ${JSON.stringify(tokens)}
+                }, '*');
+                window.close();
+              } catch (e) {
+                // Se der erro de cross-origin ou opener indisponível, redireciona 
+                window.location.href = '/';
+              }
             } else {
               window.location.href = '/';
             }
           </script>
-          <p>Autenticação concluída! Esta janela fechará automaticamente.</p>
+          <p>Autenticação concluída! Redirecionando ou fechando janela...</p>
         </body>
       </html>
     `);
