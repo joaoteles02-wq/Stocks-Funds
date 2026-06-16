@@ -1008,26 +1008,22 @@ export default function App() {
   const handleDisconnectSheets = async () => {
     if (!user) return;
     
-    if (confirm("Tem certeza que deseja desconectar o Google Sheets?")) {
-      try {
-        setSyncing(true);
-        // Remove from UI state
-        setSheetsConnected(false);
-        setSheetsTokens(null);
-        
-        // Remove from Firestore config 
-        await setDoc(doc(db, 'users', user.uid, 'config', 'sheets'), {
-          sheetsConnected: false,
-          sheetsTokens: null
-        }, { merge: true });
-        
-        alert("Google Sheets desconectado com sucesso.");
-      } catch (error) {
-        console.error("Error disconnecting:", error);
-        alert("Erro ao desconectar Google Sheets.");
-      } finally {
-        setSyncing(false);
-      }
+    try {
+      setSyncing(true);
+      // Remove from UI state
+      setSheetsConnected(false);
+      setSheetsTokens(null);
+      
+      // Remove from Firestore config 
+      await setDoc(doc(db, 'users', user.uid, 'config', 'sheets'), {
+        sheetsConnected: false,
+        sheetsTokens: null
+      }, { merge: true });
+      
+    } catch (error) {
+      console.error("Error disconnecting:", error);
+    } finally {
+      setSyncing(false);
     }
   };
 
