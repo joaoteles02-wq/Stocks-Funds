@@ -174,6 +174,31 @@ const normalizeYear = (y: any) => {
   return raw.length === 2 ? `20${raw}` : raw;
 };
 
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.05,
+      delayChildren: 0.02
+    }
+  }
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 15 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      type: "spring",
+      stiffness: 100,
+      damping: 15,
+      mass: 0.8
+    }
+  }
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'entrada' | 'historico' | 'swing-trade' | 'ir'>('dashboard');
   const [tableColumns, setTableColumns] = useState<string[]>([]);
@@ -2897,14 +2922,15 @@ export default function App() {
                 {activeTab === 'dashboard' ? (
                   <motion.div 
                     key="dashboard"
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    exit={{ opacity: 0, x: -20 }}
+                    variants={containerVariants}
+                    initial="hidden"
+                    animate="visible"
+                    exit="hidden"
                     className="flex flex-col gap-8"
                   >
 
               {/* Sparkline YTD Dashboard (Moved above summary cards) */}
-              <div className="glass-panel p-5 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-3 w-full border border-[var(--color-accent-teal)]/20 bg-[var(--color-accent-teal)]/5 relative">
+              <motion.div variants={itemVariants} className="glass-panel p-5 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-3 w-full border border-[var(--color-accent-teal)]/20 bg-[var(--color-accent-teal)]/5 relative">
                 
                 {/* Portfólio copy in top-left (with 40% font size reduction) */}
                 <div className="absolute top-4 left-5 flex flex-col items-start select-none z-10">
@@ -3011,7 +3037,7 @@ export default function App() {
                     </div>
                   </div>
                 </div>
-              </div>
+              </motion.div>
 
               {/* Dashboard Panels Grid removed since metrics are integrated inside Sparkline card */}
 
@@ -3019,7 +3045,7 @@ export default function App() {
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
                 {/* Evolution Line Chart */}
-                <div className="glass-panel p-4 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-4 h-[350px] lg:col-span-1 relative">
+                <motion.div variants={itemVariants} className="glass-panel p-4 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-4 h-[350px] lg:col-span-1 relative">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
                     <h3 className="font-semibold text-lg flex items-center gap-2">
                       <Activity className="w-5 h-5 text-[var(--color-accent-cyan)]" />
@@ -3106,10 +3132,10 @@ export default function App() {
                       </span>
                     </div>
                   </div>
-                </div>
+                </motion.div>
 
                 {/* Allocation Pie Chart */}
-                <div className="glass-panel p-4 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-6 h-[auto] min-h-[550px] lg:col-span-1">
+                <motion.div variants={itemVariants} className="glass-panel p-4 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-6 h-[auto] min-h-[550px] lg:col-span-1">
                   <div className="flex justify-between items-center mb-2">
                     <h3 className="font-semibold text-lg flex items-center gap-2 shrink-0">
                       <PieChartIcon className="w-5 h-5 text-[var(--color-accent-violet)]" />
@@ -3196,12 +3222,12 @@ export default function App() {
                       )}
                     </div>
                   </div>
-                </div>
+                </motion.div>
 
               </div>
 
               {/* Yields Bar Chart (New) */}
-              <div className="glass-panel p-4 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-4 min-h-[400px] mt-2">
+              <motion.div variants={itemVariants} className="glass-panel p-4 sm:p-6 rounded-[24px] sm:rounded-[32px] flex flex-col gap-4 min-h-[400px] mt-2">
                 <div className="flex justify-between items-center mb-2 flex-wrap gap-4">
                   <h3 className="font-semibold text-lg flex items-center gap-2">
                     <Coins className="w-5 h-5 text-emerald-400" />
@@ -3294,22 +3320,23 @@ export default function App() {
                     </div>
                   )}
                 </div>
-              </div>
+              </motion.div>
 
             </motion.div>
           ) : activeTab === 'historico' ? (
             <motion.div 
               key="historico"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
               className="flex flex-col gap-8 w-full"
             >
               {/* Assets List or Parsed CSV Data Table */}
               <div className="pb-10 w-full">
                 {filteredData ? (
                    <div className="flex flex-col gap-4">
-                     <div className="flex justify-between items-center mb-2">
+                     <motion.div variants={itemVariants} className="flex justify-between items-center mb-2">
                        <h3 className="font-semibold text-lg">Histórico</h3>
                        <button
                          onClick={() => fetchSwingTradeBatch(tickers)}
@@ -3319,9 +3346,9 @@ export default function App() {
                          {isFetchingSwing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                          {isFetchingSwing ? 'Atualizando...' : 'Atualizar Cotações'}
                        </button>
-                     </div>
+                     </motion.div>
                      
-                     <div className="glass-panel p-2 rounded-[24px]">
+                     <motion.div variants={itemVariants} className="glass-panel p-2 rounded-[24px]">
                        <div className="w-full max-h-[600px] overflow-auto custom-scrollbar rounded-[20px]">
                          <table className="w-full text-left text-sm whitespace-nowrap border-collapse min-w-max relative">
                            <thead className="sticky top-0 z-20 backdrop-blur-3xl bg-slate-900/60 shadow-[0_2px_10px_rgba(0,0,0,0.5)]">
@@ -3336,7 +3363,7 @@ export default function App() {
                            </thead>
                            <tbody className="divide-y divide-white/5">
                              {[...(filteredData || [])].reverse().map((row, index) => (
-                               <tr key={index} className="hover:bg-white/5 transition-colors group">
+                               <motion.tr key={index} variants={itemVariants} className="hover:bg-white/5 transition-colors group">
                                  {REQUIRED_COLUMNS.map((colKey, j) => {
                                    if (colKey === "B3 Preço Un") {
                                      const ticker = row["Ticker"];
@@ -3434,12 +3461,12 @@ export default function App() {
                                      <Trash2 className="w-4 h-4" />
                                    </button>
                                  </td>
-                               </tr>
+                               </motion.tr>
                              ))}
                            </tbody>
                          </table>
                        </div>
-                     </div>
+                     </motion.div>
                    </div>
                 ) : (
                   <div className="glass-panel p-16 rounded-[32px] flex flex-col items-center justify-center text-center opacity-60">
@@ -3455,12 +3482,13 @@ export default function App() {
           ) : activeTab === 'swing-trade' ? (
             <motion.div 
               key="swing-trade"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
               className="flex flex-col gap-6 w-full"
             >
-              <div className="flex justify-between items-center px-2">
+              <motion.div variants={itemVariants} className="flex justify-between items-center px-2">
                 <div>
                   <h2 className="text-2xl font-bold flex items-center gap-2">
                     <Activity className="w-6 h-6 text-[var(--color-accent-teal)]" />
@@ -3476,9 +3504,9 @@ export default function App() {
                   {isFetchingSwing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                   {isFetchingSwing ? 'Atualizando...' : 'Atualizar Cotações'}
                 </button>
-              </div>
+              </motion.div>
 
-              <div className="glass-panel p-2 rounded-[24px]">
+              <motion.div variants={itemVariants} className="glass-panel p-2 rounded-[24px]">
                 <div className="w-full max-h-[600px] overflow-auto custom-scrollbar rounded-[20px]">
                   <table className="w-full text-left text-sm whitespace-nowrap border-collapse min-w-max relative">
                     <thead className="sticky top-0 z-20 backdrop-blur-3xl bg-slate-900/60 shadow-[0_2px_10px_rgba(0,0,0,0.5)]">
@@ -3525,7 +3553,7 @@ export default function App() {
                         };
 
                         return (
-                          <tr key={ticker} className="hover:bg-white/5 transition-colors group">
+                          <motion.tr key={ticker} variants={itemVariants} className="hover:bg-white/5 transition-colors group">
                             <td className="p-4 font-bold text-[#545759] text-[110%]">{ticker}</td>
                             <td className="p-4 text-white">
                               {isFetchingSwing && !info ? (
@@ -3547,7 +3575,7 @@ export default function App() {
                             <td className="p-4 font-medium">{renderPerf(info?.perfMonth)}</td>
                             <td className="p-4 font-medium">{renderPerf(info?.perfYear)}</td>
                             <td className="p-4 font-medium">{renderPerf(info?.perfYTD)}</td>
-                          </tr>
+                          </motion.tr>
                         );
                       }) : (
                         <tr>
@@ -3559,7 +3587,7 @@ export default function App() {
                     </tbody>
                   </table>
                 </div>
-              </div>
+              </motion.div>
             </motion.div>
           ) : activeTab === 'ir' ? (
             <motion.div 
@@ -3574,12 +3602,13 @@ export default function App() {
           ) : (
             <motion.div 
               key="entrada"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+              exit="hidden"
               className="flex flex-col gap-6 w-full"
             >
-              <div className="glass-panel rounded-[24px] sm:rounded-[32px] p-5 sm:p-8 max-w-2xl mx-auto w-full mt-4">
+              <motion.div variants={itemVariants} className="glass-panel rounded-[24px] sm:rounded-[32px] p-5 sm:p-8 max-w-2xl mx-auto w-full mt-4">
                 <h2 className="text-xl sm:text-2xl font-semibold mb-6 flex items-center gap-3">
                   <Plus className="w-6 h-6 text-[var(--color-accent-cyan)]" />
                   Nova Entrada de Valores
@@ -3919,7 +3948,7 @@ export default function App() {
                     </button>
                   </div>
                 </form>
-              </div>
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>

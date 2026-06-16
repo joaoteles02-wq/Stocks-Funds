@@ -388,6 +388,31 @@ interface IRCalculatorProps {
   userId: string | null | undefined;
 }
 
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.05,
+      delayChildren: 0.02
+    }
+  }
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 15 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: {
+      type: "spring",
+      stiffness: 100,
+      damping: 15,
+      mass: 0.8
+    }
+  }
+};
+
 export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
   const [rawOps, setRawOps] = useState<Operacao[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>("lancamentos");
@@ -736,17 +761,17 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.15 }}
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+            exit="hidden"
           >
 
             {/* ── LANÇAMENTOS ── */}
             {activeTab === "lancamentos" && (
               <div className="space-y-4">
                 {/* Filtros em linha */}
-                <div className="flex flex-wrap gap-3 mb-2">
+                <motion.div variants={itemVariants} className="flex flex-wrap gap-3 mb-2">
                   <div className="relative flex-1 min-w-[200px]">
                     <input
                       type="text"
@@ -765,10 +790,10 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
                       className="w-full bg-gray-900 border border-gray-800 rounded-lg py-2 px-3 text-xs text-gray-300 focus:outline-none focus:border-blue-500"
                     />
                   </div>
-                </div>
+                </motion.div>
 
                 {/* Table */}
-                <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+                <motion.div variants={itemVariants} className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
                   <div className="overflow-x-auto overflow-y-auto max-h-[600px]">
                     {loading ? (
                       <div className="flex items-center justify-center p-8 text-gray-500 gap-2">
@@ -793,8 +818,7 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
                           {filteredOps.map((op, i) => (
                             <motion.tr
                               key={op.id || i}
-                              initial={{ opacity: 0 }}
-                              animate={{ opacity: 1 }}
+                              variants={itemVariants}
                               className="group border-b border-gray-800/50 hover:bg-gray-800/30"
                             >
                               <td className="px-3 py-2 text-gray-400 sticky left-0 bg-gray-900 z-10 w-[90px] min-w-[90px] group-hover:bg-[#1a202c]">{op.data}</td>
@@ -848,7 +872,7 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
                       </table>
                     )}
                   </div>
-                </div>
+                </motion.div>
               </div>
             )}
 
@@ -856,7 +880,7 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
             {activeTab === "resumo" && (
               <div className="space-y-4">
                 {/* Central de Orientação e Links de Pagamento */}
-                <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 space-y-4 select-none">
+                <motion.div variants={itemVariants} className="bg-gray-900 rounded-xl border border-gray-800 p-5 space-y-4 select-none">
                   <div className="flex items-start gap-3">
                     <div className="p-2 bg-blue-950/40 text-blue-400 rounded-lg border border-blue-500/20 shrink-0">
                       <ExternalLink size={20} />
@@ -939,7 +963,7 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
                       </li>
                     </ol>
                   </div>
-                </div>
+                </motion.div>
 
                 {resumo.length === 0 ? (
                   <div className="text-center text-gray-600 py-16 text-sm">Nenhuma venda registrada ainda</div>
@@ -948,7 +972,7 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
                   const isPaid = !!pg;
 
                   return (
-                    <div key={m.mesKey} className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+                    <motion.div key={m.mesKey} variants={itemVariants} className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
                       <button
                         onClick={() => setExpandedMonth(expandedMonth === m.mesKey ? null : m.mesKey)}
                         className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-800/40 transition-colors text-left"
@@ -1117,7 +1141,7 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
                           </motion.div>
                         )}
                       </AnimatePresence>
-                    </div>
+                    </motion.div>
                   );
                 })}
               </div>
@@ -1125,7 +1149,7 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
 
             {/* ── POSIÇÃO ── */}
             {activeTab === "posicao" && (
-              <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+              <motion.div variants={itemVariants} className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
                 {posicao.length === 0 ? (
                   <div className="text-center text-gray-600 py-16 text-sm">Sem posição aberta</div>
                 ) : (
@@ -1139,7 +1163,7 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
                     </thead>
                     <tbody>
                       {posicao.map((p) => (
-                        <tr key={p.papel} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                        <motion.tr key={p.papel} variants={itemVariants} className="border-b border-gray-800/50 hover:bg-gray-800/30">
                           <td className="px-4 py-3 font-medium text-white">{p.papel}</td>
                           <td className="px-4 py-3 text-gray-300">{num(p.qtd, 0)}</td>
                           <td className="px-4 py-3 text-gray-300">{num(p.pmedio, 3)}</td>
@@ -1152,18 +1176,18 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
                               {p.classe}
                             </span>
                           </td>
-                        </tr>
+                        </motion.tr>
                       ))}
                     </tbody>
                   </table>
                 )}
-              </div>
+              </motion.div>
             )}
 
             {/* ── IMPORTAR / CONFIGS ── */}
             {activeTab === "importar" && (
               <div className="grid md:grid-cols-2 gap-6">
-                <div className="space-y-6">
+                <motion.div variants={itemVariants} className="space-y-6">
                   {/* Configurações de Prejuízo */}
                   <div className="bg-gray-900 rounded-xl border border-gray-800 p-5">
                     <h2 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
@@ -1217,9 +1241,9 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
                       {syncing ? "Sincronizando..." : "Atualizar Calculadora"}
                     </button>
                   </div>
-                </div>
+                </motion.div>
 
-                <div className="space-y-6">
+                <motion.div variants={itemVariants} className="space-y-6">
                   {/* CSV */}
                   <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 h-full">
                     <h2 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
@@ -1239,7 +1263,7 @@ export default function IRCalculator({ mainRows, userId }: IRCalculatorProps) {
                     </button>
                     {importMsg && <p className="mt-3 text-center text-xs text-emerald-400">{importMsg}</p>}
                   </div>
-                </div>
+                </motion.div>
               </div>
             )}
 
