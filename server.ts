@@ -177,7 +177,7 @@ app.post("/api/finance/quote", async (req, res) => {
           
           const week = getPriceFromTarget(now - 7 * 24 * 60 * 60 * 1000);
           const month = getPriceFromTarget(now - 30 * 24 * 60 * 60 * 1000);
-          const year = hist[0].close; // 1 year ago (start of period1)
+          const year = hist[0].close * multiplier; // 1 year ago (start of period1)
           const ytdPrice = getPriceFromTarget(targetYtd);
 
           if (week) varWeek = ((currPrice - week) / week) * 100;
