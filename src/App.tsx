@@ -1032,7 +1032,12 @@ export default function App() {
   };
 
   const handleAppendToSheets = async (record: any) => {
-    if (!sheetsTokens || !spreadsheetId) return;
+    if (!sheetsTokens || !spreadsheetId) {
+      if (sheetsConnected) {
+        alert("Aviso: O Google Sheets está marcado como conectado, mas as chaves de acesso (tokens) ou o ID da planilha estão ausentes. Vá em Configurações e conecte novamente para reautorizar.");
+      }
+      return;
+    }
 
     const cleanId = spreadsheetId.includes('/d/') 
       ? spreadsheetId.split('/d/')[1].split('/')[0] 
@@ -1077,23 +1082,37 @@ export default function App() {
       });
       
       if (!resp.ok) {
-        const err = await resp.json();
-        console.error("Sheets Append Error:", err);
-        const errorMsg = err.details || err.error || "Erro desconhecido";
+        let errorMsg = "Erro desconhecido";
+        try {
+          const err = await resp.json();
+          errorMsg = err.details || err.error || "Erro desconhecido";
+        } catch (jsonErr) {
+          errorMsg = `Status do servidor ${resp.status} - Não foi possível ler a resposta de erro.`;
+        }
+        
+        console.error("Sheets Append Error:", errorMsg);
         
         let userAction = "";
         if (errorMsg.includes("Google Sheets API has not been used")) {
-          userAction = "\\n\\nImportante: Você precisa habilitar a 'Google Sheets API' no seu Google Cloud Console.";
+          userAction = "\n\nImportante: Você precisa habilitar a 'Google Sheets API' no seu Google Cloud Console.";
         } else if (errorMsg.includes("Requested entity was not found")) {
-          userAction = "\\n\\nImportante: O ID da planilha está incorreto ou a planilha não existe.";
+          userAction = "\n\nImportante: O ID da planilha está incorreto ou a planilha não existe.";
+        } else if (
+          errorMsg.toLowerCase().includes("invalid_grant") || 
+          errorMsg.toLowerCase().includes("invalid token") || 
+          errorMsg.toLowerCase().includes("expired") || 
+          errorMsg.toLowerCase().includes("unauthorized")
+        ) {
+          userAction = "\n\nSua autorização de conexão com o Google Sheets expirou ou foi revogada. Vá nas Configurações, clique em 'Desconectar' e faça a conexão novamente para reautorizar o acesso à sua planilha.";
         }
         
-        alert(`Aviso: O registro foi salvo no App, mas não pôde ser enviado para o Google Sheets.\\nDetalhes do erro: ${errorMsg}${userAction}`);
+        alert(`Aviso: O registro foi salvo no App, mas não pôde ser enviado para o Google Sheets.\nDetalhes do erro: ${errorMsg}${userAction}`);
       } else {
         console.log("Successfully appended to Sheets");
       }
     } catch (error) {
       console.error("Error writing to Sheets API:", error);
+      alert(`Erro de conexão ao enviar para o Google Sheets: ${error instanceof Error ? error.message : String(error)}.\nO registro foi salvo no App com sucesso.`);
     }
   };
 
