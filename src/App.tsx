@@ -102,9 +102,11 @@ const REQUIRED_COLUMNS = [
   "Dollar"
 ];
 
-const normalizeHeader = (header: string) => {
+const normalizeHeader = (header: any) => {
+  if (header === undefined || header === null) return "";
+  const headerStr = String(header);
   // Remove BOM and invisible characters, then trim and normalize spaces
-  const norm = header.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().replace(/\s+/g, ' ').toLowerCase();
+  const norm = headerStr.replace(/[\u200B-\u200D\uFEFF]/g, '').trim().replace(/\s+/g, ' ').toLowerCase();
   
   if (norm.includes('dollar') || norm.includes('dolar') || norm.includes('dólar')) return 'Dollar';
   if (norm === 'date' || norm === 'data' || norm.startsWith('data') || norm.includes('negôcio') || norm.includes('negócio') || norm.includes('negocio') || norm.includes('pregao') || norm.includes('pregão') || norm === 'dia' || norm.includes('liquidação') || norm.includes('liquidacao') || norm.includes('movimentação')) return 'Data';
@@ -1604,7 +1606,7 @@ export default function App() {
       const isVendaRow = transacaoString.includes("VENDA") || transacaoString.includes("SELL");
       const isCompraOrVendaRow = isCompraRow || isVendaRow;
 
-      let currentUn = isCompraOrVendaRow ? parseNum(row["UN"]) : 0;
+      let currentUn = parseNum(row["UN"]);
       if (isVendaRow) {
         currentUn = -Math.abs(currentUn);
       }
