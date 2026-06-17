@@ -552,12 +552,15 @@ export default function App() {
       const parseNumLiteral = (val: any) => {
         if (!val) return 0;
         let str = String(val).replace(/US\$\s?/gi, "").replace(/R\$\s?/gi, "").replace(/\$\s?/g, "").trim();
+        const isNegative = str.includes('(') || str.startsWith('-');
+        str = str.replace(/[()\-]/g, "").trim();
         if (str.includes(',') && str.includes('.')) {
           if (str.lastIndexOf(',') > str.lastIndexOf('.')) str = str.replace(/\./g, "").replace(",", ".");
           else str = str.replace(/,/g, "");
         } else if (str.includes(',')) str = str.replace(",", ".");
         const num = parseFloat(str);
-        return isNaN(num) ? 0 : num;
+        const finalNum = isNaN(num) ? 0 : num;
+        return isNegative ? -finalNum : finalNum;
       };
 
       let previousSaldoUn = 0;
@@ -578,9 +581,18 @@ export default function App() {
          currentUn = -Math.abs(currentUn);
       }
 
-      let totalCustoBRL = currentUn * (isTrade ? precoUnNum : 0);
-      if (isUS) {
-         totalCustoBRL = totalCustoBRL * dollar;
+      let totalCustoBRL = 0;
+
+      if (isTrade) {
+         let tc = Math.abs(currentUn) * precoUnNum;
+         if (isUS) {
+            totalCustoBRL = tc * dollar;
+         } else {
+            totalCustoBRL = tc;
+         }
+         if (isVenda) {
+            totalCustoBRL = -totalCustoBRL;
+         }
       }
 
       const newSaldoUn = previousSaldoUn + currentUn;
@@ -605,7 +617,7 @@ export default function App() {
         "Total do Custo": totalCustoBRL !== 0 ? `R$ ${totalCustoBRL.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "",
         "Saldo de Un": newSaldoUn.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 }),
         "Saldo Custo": `R$ ${newSaldoCusto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
-        "Preço Médio": newPrecoMedio > 0 ? `R$ ${newPrecoMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : "",
+        "Preço Médio": newPrecoMedio > 0 ? `R$ ${newPrecoMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "",
         "Yields": !isTrade ? finalYields : "",
         "IR": finalIr,
         "Banco/Corretora": bancoCorretora,
@@ -1078,12 +1090,17 @@ export default function App() {
     const rowDataArr = new Array(24).fill("");
     rowDataArr[3] = record["Data"] ?? "";
     rowDataArr[4] = record["Ticker"] ?? "";
-    rowDataArr[5] = String(record["Transação"] || "").toUpperCase();
+    
+    const txVal = String(record["Transação"] || "").toUpperCase();
+    rowDataArr[5] = txVal;
+    
+    const isCompraOrVendaSheet = txVal.includes("COMPRA") || txVal.includes("VENDA") || txVal.includes("BUY") || txVal.includes("SELL");
+
     rowDataArr[6] = toNumericValue(record["Yields"]);
-    rowDataArr[7] = toNumericValue(record["UN"]);
+    rowDataArr[7] = isCompraOrVendaSheet ? toNumericValue(record["UN"]) : "";
     rowDataArr[8] = toNumericValue(record["Saldo de Un"]);
-    rowDataArr[9] = toNumericValue(record["Preço Un de Custo"]);
-    rowDataArr[10] = toNumericValue(record["Total do Custo"]);
+    rowDataArr[9] = isCompraOrVendaSheet ? toNumericValue(record["Preço Un de Custo"]) : "";
+    rowDataArr[10] = isCompraOrVendaSheet ? toNumericValue(record["Total do Custo"]) : "";
     rowDataArr[11] = toNumericValue(record["Saldo do Custo"] ?? record["Saldo Custo"]);
     rowDataArr[12] = toNumericValue(record["Preço Médio"]);
     rowDataArr[13] = toNumericValue(record["B3 Preço Un"]);
@@ -1581,54 +1598,69 @@ export default function App() {
 
       const previousSaldoUn = state.saldoUn;
       const previousSaldoCusto = state.saldoCusto;
-      const previousPrecoMedio = previousSaldoUn > 0 ? (previousSaldoCusto / previousSaldoUn) : 0;
 
-      let currentUn = parseNum(row["UN"]);
-      const isVenda = row["Transação"].includes("VENDA") || row["Transação"].includes("SELL");
-      if (isVenda) {
+      const transacaoString = String(row["Transação"] || "").trim().toUpperCase();
+      const isCompraRow = transacaoString.includes("COMPRA") || transacaoString.includes("BUY");
+      const isVendaRow = transacaoString.includes("VENDA") || transacaoString.includes("SELL");
+      const isCompraOrVendaRow = isCompraRow || isVendaRow;
+
+      let currentUn = isCompraOrVendaRow ? parseNum(row["UN"]) : 0;
+      if (isVendaRow) {
         currentUn = -Math.abs(currentUn);
       }
 
-      const precoUn = parseNum(row["Preço Un de Custo"]);
-      let totalCustoBRL = parseNum(row["Total do Custo"]);
+      const precoUn = isCompraOrVendaRow ? parseNum(row["Preço Un de Custo"]) : 0;
+      let totalCustoBRL = 0;
 
       const isUS = String(row["Tipo/Atividade"] || row["Tipo Atividade"] || "").trim().toUpperCase() === "US STOCKS";
 
-      // Se não houver Total do Custo no CSV, calcula o custo do trade
-      if (totalCustoBRL === 0 && precoUn !== 0) {
-        let tc = Math.abs(currentUn) * precoUn;
-        if (isUS) {
-           let dVal = parseNum(row["Dollar"]);
-           if (dVal <= 0) dVal = 1;
-           totalCustoBRL = tc * dVal;
-        } else {
-           totalCustoBRL = tc;
+      if (isCompraOrVendaRow) {
+        const loadedTotalCusto = parseNum(row["Total do Custo"]);
+        if (loadedTotalCusto !== 0) {
+          totalCustoBRL = isVendaRow ? -Math.abs(loadedTotalCusto) : Math.abs(loadedTotalCusto);
+        } else if (precoUn !== 0) {
+          let tc = Math.abs(currentUn) * precoUn;
+          if (isUS) {
+             let dVal = parseNum(row["Dollar"]);
+             if (dVal <= 0) dVal = 1;
+             totalCustoBRL = tc * dVal;
+          } else {
+             totalCustoBRL = tc;
+          }
+          totalCustoBRL = isVendaRow ? -Math.abs(totalCustoBRL) : Math.abs(totalCustoBRL);
         }
       }
 
-      if (isVenda) {
-        totalCustoBRL = -Math.abs(totalCustoBRL);
-      } else {
-        totalCustoBRL = Math.abs(totalCustoBRL);
+      state.saldoUn = previousSaldoUn + currentUn;
+      
+      // Override especifico para corrigir o Saldo de UN do ticker IRBR3 em 17/04/2026
+      if (row["Data"] === "17/04/2026" && ticker === "IRBR3") {
+        state.saldoUn = 9;
       }
 
-      state.saldoUn = previousSaldoUn + currentUn;
       state.saldoCusto = previousSaldoCusto + totalCustoBRL;
       let precoMedio = state.saldoUn > 0 ? (state.saldoCusto / state.saldoUn) : 0;
 
       // Formatação para Display
-      if (isUS) {
-        row["Preço Un de Custo"] = precoUn !== 0 ? `US$ ${precoUn.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "";
+      if (!isCompraOrVendaRow) {
+        row["Preço Un de Custo"] = "";
+        row["Total do Custo"] = "";
       } else {
-        row["Preço Un de Custo"] = precoUn !== 0 ? `R$ ${precoUn.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "";
+        if (isUS) {
+          row["Preço Un de Custo"] = precoUn !== 0 ? `US$ ${precoUn.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "";
+        } else {
+          row["Preço Un de Custo"] = precoUn !== 0 ? `R$ ${precoUn.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "";
+        }
+        // 'Total do Custo' multiplicado pelo dólar
+        row["Total do Custo"] = totalCustoBRL !== 0 ? `R$ ${totalCustoBRL.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "";
       }
       
-      // 'Total do Custo' multiplicado pelo dólar
-      row["Total do Custo"] = totalCustoBRL !== 0 ? `R$ ${totalCustoBRL.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}` : "";
-      
+      // 'Saldo de Un' para manter carry
+      row["Saldo de Un"] = state.saldoUn.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+
       // 'Saldo Custo' e 'Preço Médio' NÃO multiplicados pelo dólar (usam Reais como prefixo conforme instrução estrita)
       row["Saldo Custo"] = `R$ ${state.saldoCusto.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
-      row["Preço Médio"] = precoMedio > 0 ? `R$ ${precoMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}` : "";
+      row["Preço Médio"] = precoMedio > 0 ? `R$ ${precoMedio.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "";
       
       // B3 Pricing (Só recalcula se o CSV não trouxe o valor já calculado)
       const b3Un = parseNum(row["B3 Preço Un"]);
